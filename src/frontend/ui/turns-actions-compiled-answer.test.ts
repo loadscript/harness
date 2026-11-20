@@ -14,11 +14,10 @@
 // the SERVER's own fold (`../../server/turn-projector`), so the card is driven by the
 // same compiled bytes a reload receives.
 
-import { agent, harness } from '@underload/harness';
-import { projectTurn } from '@underload/harness/server/turn-projector';
-import type { SessionTurn } from '@underload/harness/server';
-import type { DisplayProjectContext } from '@underload/harness/shared/turn-display';
-import type { HarnessActionAnswer, HarnessActionRequest } from '@underload/harness/types';
+import { projectTurn } from '../../server/turn-projector';
+import type { SessionTurn } from '../../server/protocol';
+import type { DisplayProjectContext } from '../../shared/turn-display';
+import type { HarnessActionAnswer, HarnessActionRequest } from '../../types';
 import { createActionRequestCard } from './action-request';
 import { createTurnBoard } from './turns';
 

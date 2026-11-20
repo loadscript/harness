@@ -40,8 +40,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts agent-instructions-lazy-main.test.ts
 
-import type { AgentRank } from '@underload/harness/types';
-import type { HarnessDescriptor } from '@underload/harness/server';
+import type { AgentRank } from '../types';
+import type { HarnessDescriptor } from '../server/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

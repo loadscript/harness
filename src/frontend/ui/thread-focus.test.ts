@@ -9,7 +9,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/thread-focus.test.ts
 
-import type { HarnessEvent, SessionTurn } from '@underload/harness/server';
+import type { HarnessEvent, SessionTurn } from '../../server/protocol';
 import { composerStopOf } from './composer';
 import { createTurnBoard } from './turns';
 import type { TurnHandle } from './turns';

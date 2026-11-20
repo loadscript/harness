@@ -63,11 +63,11 @@
 // ../../server/api-thread-roster-invocation-ids.test.ts (the row's exact key order and emit rule).
 
 import { describe, expect, it } from 'vitest';
-import type { HarnessEvent, SessionSnapshot, SessionThread, SessionTurn } from '@underload/harness/server';
+import type { HarnessEvent, SessionSnapshot, SessionThread, SessionTurn } from '../../server/protocol';
 // W26 (2026-11-17): F7 runs the export path for real — the roster PAGE row type and the rename that feeds
 // the fold (`../view-shell.ts` `getRawSession`), so the pin cannot pass by hand-writing a shape the client
 // never actually receives.
-import type { ThreadSummary } from '@underload/harness/shared/harness-api';
+import type { ThreadSummary } from '../../shared/harness-api';
 import { threadRowOf } from '../view-api';
 import { buildThreadTranscriptJson } from './thread-transcript';
 

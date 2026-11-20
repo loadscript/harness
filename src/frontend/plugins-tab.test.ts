@@ -147,7 +147,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts src/frontend/plugins-tab.test.ts
 
-import type { HarnessDescriptor, SessionSnapshot, SessionStreamItem, ToolDescriptor } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionStreamItem, ToolDescriptor } from '../server/protocol';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';

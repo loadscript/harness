@@ -16,9 +16,9 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts src/frontend/ui/provider-tile-diagnostics.test.ts
 
-import type { SessionView } from '@underload/harness/server';
-import type { HarnessEvent } from '@underload/harness/types';
-import type { TurnDisplayOp, TurnSection, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { SessionView } from '../../server/protocol';
+import type { HarnessEvent } from '../../types';
+import type { TurnDisplayOp, TurnSection, TurnSummary } from '../../shared/turn-display';
 import type { TurnBoard } from './turns';
 import { createTurnBoard } from './turns';
 import { applyOpsToDisplay } from '../view-state';

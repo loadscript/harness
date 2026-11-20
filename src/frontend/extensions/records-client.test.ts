@@ -16,7 +16,7 @@ import type {
     RecordChangeRow,
     RecordsDeltaResponse,
     RecordsSnapshotResponse
-} from '@underload/harness/shared/harness-api';
+} from '../../shared/harness-api';
 import {
     RECORDS_ERROR_CLIP,
     clipRecordError,

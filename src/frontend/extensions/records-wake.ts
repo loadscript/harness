@@ -31,8 +31,8 @@
 //   - ./context.ts        — `PanelSubscribe`, the seam this dials through
 //   - ./view-shell.ts     — the baseline/reconciliation rules this mirrors
 
-import type { RecordsSignal } from '@underload/harness/shared/harness-api';
-import type { WsResyncRequired, WsSubscriptionState, WsUpdate } from '@underload/harness/shared/harness-stream';
+import type { RecordsSignal } from '../../shared/harness-api';
+import type { WsResyncRequired, WsSubscriptionState, WsUpdate } from '../../shared/harness-stream';
 import { defaultPanelSubscribe } from './context';
 import type { PanelSubscriptionSpec } from './context';
 import { clipRecordError } from './records-client';

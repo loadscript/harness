@@ -34,8 +34,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts api.test.ts
 
-import { HARNESS_PAGE_LIMIT, HARNESS_ROUTES } from '@underload/harness/shared/harness-api';
-import type { GlobalConfigDocument, HarnessCard, PluginSummary, ServiceInfo, ToolSummary, AgentSummary, SessionSummary } from '@underload/harness/shared/harness-api';
+import { HARNESS_PAGE_LIMIT, HARNESS_ROUTES } from '../shared/harness-api';
+import type { GlobalConfigDocument, HarnessCard, PluginSummary, ServiceInfo, ToolSummary, AgentSummary, SessionSummary } from '../shared/harness-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { API_ROOT_STORAGE_KEY, normalizeApiRoot, saveApiRootSetting, storedApiRoot } from './api';
 

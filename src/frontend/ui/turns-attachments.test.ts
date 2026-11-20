@@ -12,8 +12,8 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/turns-attachments.test.ts
 
 import { describe, expect, it, vi } from 'vitest';
-import type { SessionTurn } from '@underload/harness/server';
-import type { HarnessAttachment } from '@underload/harness/types';
+import type { SessionTurn } from '../../server/protocol';
+import type { HarnessAttachment } from '../../types';
 import type { FilePreviewReader } from './file-preview';
 import { createTurnBoard } from './turns';
 

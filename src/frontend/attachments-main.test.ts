@@ -15,8 +15,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts attachments-main.test.ts
 
-import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
-import type { HarnessAttachment } from '@underload/harness/types';
+import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
+import type { HarnessAttachment } from '../types';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

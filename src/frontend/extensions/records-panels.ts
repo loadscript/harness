@@ -94,7 +94,7 @@
 //   - ../main.ts        — `registerBuiltinShellPanels()` at boot
 //   - ../styles.css     — every class named here (the new section at the end)
 
-import type { RecordsDeltaResponse, RecordsSnapshotResponse } from '@underload/harness/shared/harness-api';
+import type { RecordsDeltaResponse, RecordsSnapshotResponse } from '../../shared/harness-api';
 import type { RecordsClient, RecordsClientOptions, RecordsFeedRow, RecordsNotice, RecordsTask } from './records-client';
 import { RECORDS_FEED_WINDOW, TASKS_COLLECTION, createRecordsClient, recordsActorOf } from './records-client';
 import type { PanelContext } from './context';

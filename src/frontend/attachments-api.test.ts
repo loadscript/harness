@@ -13,8 +13,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts attachments-api.test.ts
 
-import type { HarnessAttachment } from '@underload/harness/types';
-import type { TaskReceipt } from '@underload/harness/shared/harness-api';
+import type { HarnessAttachment } from '../types';
+import type { TaskReceipt } from '../shared/harness-api';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const attachment: HarnessAttachment = {

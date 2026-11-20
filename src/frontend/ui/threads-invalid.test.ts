@@ -21,7 +21,7 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/threads-invalid.test.ts
 
 import { describe, expect, it } from 'vitest';
-import type { SessionSnapshot, SessionThread } from '@underload/harness/server';
+import type { SessionSnapshot, SessionThread } from '../../server/protocol';
 import { invalidThreadsOf, sessionThreadsOf } from './threads';
 
 const snapshotOf = (overrides: Record<string, unknown> = {}): SessionSnapshot =>

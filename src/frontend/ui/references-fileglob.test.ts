@@ -15,7 +15,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 // The file tools are the canonical `*.tool.ts` modules, and the rename split the
 // two-mode `fileGlob` into `glob` (names) + `grep` (contents). The @ picker only
 // ever asked for names, so this consumes `glob.tool.ts` — a REAL tool, no fixture.
-import { glob } from '@underload/harness';
+import { glob } from './glob-test-support';
 import { fileGlobPattern } from './references';
 
 // Locate the repo root regardless of whether vitest runs from the package root

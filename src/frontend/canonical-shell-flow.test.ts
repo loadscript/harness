@@ -20,7 +20,7 @@
 //   paints the row with no session re-read → the socket's frames settle the same row.
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts src/frontend/canonical-shell-flow.test.ts
-import { HARNESS_SERVICE_CAPABILITIES, HARNESS_SERVICE_LIMITS, HARNESS_PAGE_LIMIT } from '@underload/harness/shared/harness-api';
+import { HARNESS_SERVICE_CAPABILITIES, HARNESS_SERVICE_LIMITS, HARNESS_PAGE_LIMIT } from '../shared/harness-api';
 import { sessionToolPage, sessionToolRow } from './session-config-test-support';
 import type { HarnessStreamOptions, StreamDouble } from './view-test-support';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';

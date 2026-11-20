@@ -13,7 +13,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts thread-conversation-shell.test.ts
 
-import type { HarnessDescriptor, HarnessEvent, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, HarnessEvent, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

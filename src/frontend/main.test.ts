@@ -26,12 +26,12 @@ import type {
     SessionStreamItem,
     SessionTurn,
     ToolDescriptor
-} from '@underload/harness/server';
+} from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { bumpFixtureEpoch, viewAwareFetch } from './view-test-support';
 // The canonical ladder, so the fakes below can fill ranks exactly the way the route does.
-import { AGENT_RANKS, rankIndexOf } from '@underload/harness/types';
-import type { AgentRank } from '@underload/harness/types';
+import { AGENT_RANKS, rankIndexOf } from '../types';
+import type { AgentRank } from '../types';
 import { sessionToolPage, sessionToolRow } from './session-config-test-support';
 import type { HarnessStreamOptions, StreamDouble } from './view-test-support';
 

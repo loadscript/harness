@@ -54,7 +54,7 @@
 import { agentCodeOf } from './agent-label';
 // Type-only: the browser bundle never loads server code, and this import is erased at
 // build time (same pattern as ui/thread-transcript.ts and contract.ts).
-import type { SessionInvalidThread } from '@underload/harness/server';
+import type { SessionInvalidThread } from '../../server/protocol';
 
 // One live persistent thread, as the session snapshot reports it. Every field is
 // validated on read (see sessionThreadsOf) because the roster is server data and a

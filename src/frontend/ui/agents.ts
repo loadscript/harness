@@ -74,8 +74,8 @@
 //   - src/frontend/styles.css — `.agent-row`, `.agent-tile`, `.agent-picker`,
 //     `.agent-rank*`, `.agent-entry`
 
-import type { AgentRank } from '@underload/harness/types';
-import type { AgentDescriptor } from '@underload/harness/server';
+import type { AgentRank } from '../../types';
+import type { AgentDescriptor } from '../../server/protocol';
 // Rank wording and stepping come from the one place that owns them, so a tile, a
 // dialog tab and the create form can never spell a rank differently.
 import { HIGHEST_RANK, LOWEST_RANK, isAgentRank, rankLabelOf, stepRank } from '../contract';

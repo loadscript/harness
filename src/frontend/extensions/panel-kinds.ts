@@ -36,7 +36,7 @@
 //   - ./runtime.ts           — the mount/unmount engine the shell paints through
 //   - ../index.ts            — the published client barrel
 
-import type { ToolUiBlock, ToolUiPanel } from '@underload/harness/server';
+import type { ToolUiBlock, ToolUiPanel } from '../../server/protocol';
 import type { PanelMedia, PanelSlot } from '../ui/panels';
 
 // The name the shell's own block renderer answers. A panel that carries no `kind`

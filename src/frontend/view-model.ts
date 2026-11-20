@@ -25,8 +25,8 @@
 // (../shared/turn-display.ts owns `TurnSummary`/`TurnDisplay`/`TurnSection`), and
 // the generated contract keeps the display subtree camelCase on purpose. The
 // snake_case resource rows are converted here, once, at the boundary.
-import type { PendingAction, SessionTurnStatus } from '@underload/harness/shared/harness-api';
-import type { TurnDisplay, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { PendingAction, SessionTurnStatus } from '../shared/harness-api';
+import type { TurnDisplay, TurnSummary } from '../shared/turn-display';
 
 // A conversation as the roster shows it: identity, ownership, lifecycle, and
 // transcript SIGNALS. This is `ThreadSummary`/`ThreadResource` with the contract's

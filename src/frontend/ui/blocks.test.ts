@@ -7,8 +7,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/blocks.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent } from '@underload/harness/server';
-import { findAgentResultBlock, listAgentResultBlocks } from '@underload/harness/shared';
+import type { HarnessAssistantMessage, HarnessEvent } from '../../server/protocol';
+import { findAgentResultBlock, listAgentResultBlocks } from '../../shared';
 import { createTurnBoard } from './turns';
 
 const doneMessage = (content: string): HarnessAssistantMessage => ({

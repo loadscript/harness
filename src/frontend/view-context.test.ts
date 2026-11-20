@@ -14,7 +14,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-context.test.ts
 
-import type { ContextBlock, TurnDisplay } from '@underload/harness/shared/turn-display';
+import type { ContextBlock, TurnDisplay } from '../shared/turn-display';
 import {
     CONTEXT_BAR_EXCLUDED_ALPHA,
     CONTEXT_BAR_FALLBACK_WIDTH,

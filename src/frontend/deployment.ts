@@ -52,7 +52,7 @@
 // `src/port.ts`). That package is not published to npm and this package is
 // published standalone, so the values are restated here (the same convention the
 // `distribution/*` UIs use) and named identically to stay greppable.
-import { isPagesHostname } from '@underload/harness/shared';
+import { isPagesHostname } from '../shared';
 
 // Standard local area network host name (config/environment/src/host.ts).
 export const LOCAL_AREA_NETWORK_HOST_NAME = '192.168.50.109';

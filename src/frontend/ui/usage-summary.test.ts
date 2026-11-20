@@ -22,7 +22,7 @@
 // Run (all UI):  npx vitest run --config src/frontend/vitest.config.ts
 import { summarizeSessionUsage } from './usage-summary';
 import type { UsageSession } from './usage-summary';
-import type { SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { SessionSnapshot, SessionTurn } from '../../server/protocol';
 import type { SessionViewSummary } from '../view-model';
 
 // Compile-time proof the parameter still accepts the two shapes the frontend actually

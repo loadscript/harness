@@ -25,7 +25,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-api-blocks.test.ts
 
-import type { TurnBlockDetail } from '@underload/harness/shared/harness-api';
+import type { TurnBlockDetail } from '../shared/harness-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readBlockDetail, writeBlockInclusion } from './view-api';
 

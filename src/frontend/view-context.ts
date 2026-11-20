@@ -117,10 +117,10 @@ import type {
     StepDisplayState,
     TurnDisplay,
     TurnSection
-} from '@underload/harness/shared/turn-display';
+} from '../shared/turn-display';
 // T26 (R26): the ONE configured bound a bounded prose body already uses, reused for the
 // render-side preview window so no second arbitrary cap is invented (../shared/turn-display.ts:135).
-import { DISPLAY_NODE_PREVIEW_CHARS } from '@underload/harness/shared/turn-display';
+import { DISPLAY_NODE_PREVIEW_CHARS } from '../shared/turn-display';
 import { elapsedBetween, formatDuration } from './ui/time';
 
 // ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@
 // The stub server mirrors the real shape: `parameters` is the array, and the result is
 // the `list` receipt the implementation returns.
 
-import type { ToolDescriptor } from '@underload/harness/server';
+import type { ToolDescriptor } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 import { sessionToolReads } from './session-config-test-support';

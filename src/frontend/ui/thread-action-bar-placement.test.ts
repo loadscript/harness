@@ -27,7 +27,7 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/thread-action-bar-placement.test.ts
 
-import type { HarnessEvent, SessionTurn } from '@underload/harness/server';
+import type { HarnessEvent, SessionTurn } from '../../server/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTurnBoard } from './turns';
 import type { SessionThreadEntry } from './threads';

@@ -27,14 +27,14 @@
 //   - ./preview.ts                  — the dialog an inline chip opens
 //   - ../../frontend/styles.css     — `.composer-chip`, `.attachment-chip`, `.attachment-inline`
 
-import type { HarnessAttachment } from '@underload/harness/types';
+import type { HarnessAttachment } from '../../types';
 import {
     attachmentMarker,
     MAX_ATTACHMENTS_PER_TURN,
     MAX_ATTACHMENT_BYTES,
     MAX_TOTAL_ATTACHMENT_BYTES,
     validateAttachments
-} from '@underload/harness/shared';
+} from '../../shared';
 
 // The exact kinds the wire contract accepts. Kept as a local alias so callers do
 // not need to reach into the type module for a union member.

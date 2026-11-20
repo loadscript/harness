@@ -9,11 +9,11 @@
 // `AgentDescriptor` lives in the server protocol; ./agents.ts imports it from there.
 // (../contract only re-declares it for its own helpers, so pointing at the protocol
 // keeps this file typechecking like ui/agent-dialog.test.ts does.)
-import type { AgentDescriptor } from '@underload/harness/server';
+import type { AgentDescriptor } from '../../server/protocol';
 import { agentDefaultInstructionOf, agentDetailsOf, createAgentRow } from './agents';
 import type { AgentRowOptions } from './agents';
 // The rank vocabulary (../types/index.ts): a tile's letter is a data fact, asserted exactly.
-import type { AgentRank } from '@underload/harness/types';
+import type { AgentRank } from '../../types';
 
 const agents: AgentDescriptor[] = [
     {

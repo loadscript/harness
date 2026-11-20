@@ -28,8 +28,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts src/frontend/display-project-steers.test.ts
 
-import type { TurnSummary as WireTurnSummary } from '@underload/harness/shared/harness-api';
-import type { TurnSummary } from '@underload/harness/shared/turn-display';
+import type { TurnSummary as WireTurnSummary } from '../shared/harness-api';
+import type { TurnSummary } from '../shared/turn-display';
 import { describe, expect, it } from 'vitest';
 import { projectRow } from './display-project';
 import { wireRowOf } from './view-test-support';

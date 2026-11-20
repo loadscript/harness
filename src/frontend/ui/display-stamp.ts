@@ -62,7 +62,7 @@
 // covers its shape, and to ./display-stamp.test.ts's mutation set. Fields of shapes this
 // file does not type out (`pending`, `panels`, `media`, `action`, and any future object a
 // wire value carries inside a step) go through the bounded digest, which sees them all.
-import type { ContextBlock, DisplayNode, DisplayTail, TurnDisplay, TurnSection } from '@underload/harness/shared/turn-display';
+import type { ContextBlock, DisplayNode, DisplayTail, TurnDisplay, TurnSection } from '../../shared/turn-display';
 
 // At or below this length a string contributes its characters VERBATIM: every field the
 // renderer paints from a bounded wire value (a notice line, a name, a state word, an id, a

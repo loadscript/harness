@@ -11,7 +11,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/thread-steer-routing.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
 import type { SessionThreadEntry } from './threads';
 import { createTurnBoard } from './turns';
 

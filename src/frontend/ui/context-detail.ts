@@ -67,7 +67,7 @@
 //   - ./dialog.ts / ./dialog.css       — the modal shell
 //   - ./tools.ts                       — `createCodeBlock`, the line-numbered payload viewer
 
-import type { ContextBlock, StepDisplayState, TurnBlockDetail } from '@underload/harness/shared/turn-display';
+import type { ContextBlock, StepDisplayState, TurnBlockDetail } from '../../shared/turn-display';
 // T7: the segment dialog is the ONE surface where a reader switches a segment in or out of
 // the prompt, and `./tools.ts:107` is the precedent for a `ui/` module holding its own
 // transport call: the tile may still INJECT a writer (the way it injects `loadBlockDetail`),

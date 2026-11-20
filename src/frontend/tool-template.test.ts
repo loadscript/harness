@@ -29,7 +29,7 @@
 // Nothing runs on selection: the box stays editable and the only request this file
 // makes is the boot document (asserted).
 
-import type { ToolDescriptor } from '@underload/harness/server';
+import type { ToolDescriptor } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 import { sessionToolReads } from './session-config-test-support';

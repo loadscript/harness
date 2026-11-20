@@ -66,7 +66,7 @@
 //   - src/frontend/ui/tokens.ts    — `formatTokens`, the display formatter
 //   - src/server/protocol.ts       — SessionSnapshot / SessionTurn / SessionThread
 
-import type { HarnessUsage } from '@underload/harness/types';
+import type { HarnessUsage } from '../../types';
 import { usageOf } from '../contract';
 import { elapsedBetween } from './time';
 

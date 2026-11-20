@@ -27,8 +27,8 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/turns-compiled-run-epoch.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn, SessionView } from '@underload/harness/server';
-import type { DisplayNode, TurnDisplayOp, TurnSection, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn, SessionView } from '../../server/protocol';
+import type { DisplayNode, TurnDisplayOp, TurnSection, TurnSummary } from '../../shared/turn-display';
 import { applyOpsToDisplay } from '../view-state';
 import { createTurnBoard, type TurnBoard } from './turns';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

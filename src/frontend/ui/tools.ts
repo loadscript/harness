@@ -105,7 +105,7 @@
 //   - styles: src/frontend/styles.css (`.tool`, `.tool-*`, `.file-link`) and ui/dialog.css
 
 import { callTool } from '../api';
-import type { HarnessToolOutcome, ToolMediaDescriptor, ToolUiPanel } from '@underload/harness/types';
+import type { HarnessToolOutcome, ToolMediaDescriptor, ToolUiPanel } from '../../types';
 import { createTextCopyButton, openDialog, type DialogHandle } from './dialog';
 import { enhanceFileLinks } from './file-links';
 import { openFilePreview, type FilePreviewReader, type FilePreviewResult } from './file-preview';

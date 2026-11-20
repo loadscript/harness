@@ -46,7 +46,7 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts composer-agent-cycle.test.ts
 
-import type { AgentDescriptor, HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { AgentDescriptor, HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

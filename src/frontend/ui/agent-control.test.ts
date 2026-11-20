@@ -23,7 +23,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { AgentDescriptor } from '@underload/harness/server';
+import type { AgentDescriptor } from '../../server/protocol';
 import { createAgentControl } from './agent-control';
 import type { AgentControl, AgentControlOptions } from './agent-control';
 import { PRESS_HOLD_MS, PRESS_SLOP_PX } from './press-hold';

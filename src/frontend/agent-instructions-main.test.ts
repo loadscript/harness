@@ -22,8 +22,8 @@
 // R4 (T7a) removed the read-only "preset instruction" block and its revert control: there is ONE
 // box, it holds the complete prompt the agent runs, and clearing its text by hand is the undo.
 
-import type { AgentRank } from '@underload/harness/types';
-import type { HarnessDescriptor, SessionSnapshot } from '@underload/harness/server';
+import type { AgentRank } from '../types';
+import type { HarnessDescriptor, SessionSnapshot } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

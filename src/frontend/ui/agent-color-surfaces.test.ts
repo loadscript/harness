@@ -31,10 +31,10 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/agent-color-surfaces.test.ts
 
-import type { AgentDescriptor, HarnessEvent } from '@underload/harness/server';
+import type { AgentDescriptor, HarnessEvent } from '../../server/protocol';
 // The rank vocabulary (../../types/index.ts): the dialog fixture states ranks so the surfaces
 // have real team facts to paint.
-import type { AgentRank } from '@underload/harness/types';
+import type { AgentRank } from '../../types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AGENT_PALETTE, UNKNOWN_AGENT_COLOR, configureAgentColors, resetAgentColors } from './agent-color';
 import { createAgentControl } from './agent-control';

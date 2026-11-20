@@ -42,7 +42,7 @@ import type {
     QueuedTaskPage,
     PendingActionListResponse,
     AttachmentResponse
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
     actionRequestOf,

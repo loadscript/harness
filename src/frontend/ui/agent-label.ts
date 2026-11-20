@@ -21,5 +21,5 @@
 //     sections) and writes them into block headers;
 //   - ui/agent-color.ts `agentKeyOf` — shared identity normalisation.
 
-export { agentCodeOf, createAgentLabels } from '@underload/harness/shared';
-export type { AgentLabels } from '@underload/harness/shared';
+export { agentCodeOf, createAgentLabels } from '../../shared';
+export type { AgentLabels } from '../../shared';

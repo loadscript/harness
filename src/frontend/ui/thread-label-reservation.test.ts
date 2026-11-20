@@ -9,9 +9,9 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/thread-label-reservation.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
-import { findAgentResultBlock, listAgentResultBlocks } from '@underload/harness/shared';
-import type { AgentResultTurn } from '@underload/harness/shared';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
+import { findAgentResultBlock, listAgentResultBlocks } from '../../shared';
+import type { AgentResultTurn } from '../../shared';
 import type { SessionThreadEntry } from './threads';
 import { createTurnBoard } from './turns';
 

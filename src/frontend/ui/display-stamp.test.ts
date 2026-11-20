@@ -20,7 +20,7 @@
 // Run: yarn vitest run src/frontend/ui/display-stamp.test.ts
 
 import { describe, expect, it } from 'vitest';
-import type { ContextBlock, DisplayNode, TurnDisplay, TurnSection } from '@underload/harness/shared/turn-display';
+import type { ContextBlock, DisplayNode, TurnDisplay, TurnSection } from '../../shared/turn-display';
 import { displayStampOf } from './display-stamp';
 
 // The stamp V1 used, spelled out here so the equivalence is stated against the REAL old

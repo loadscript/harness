@@ -23,8 +23,8 @@
 // The last describe block pins that fold — it is the difference between the quiet-ring CSS
 // existing and the quiet-ring CSS ever being painted.
 
-import type { HarnessEvent, SessionTurn } from '@underload/harness/server';
-import type { TurnDisplay, TurnDisplayOp, TurnSection } from '@underload/harness/shared/turn-display';
+import type { HarnessEvent, SessionTurn } from '../../server/protocol';
+import type { TurnDisplay, TurnDisplayOp, TurnSection } from '../../shared/turn-display';
 import {
     activityOfTurn,
     activityOfTurns,

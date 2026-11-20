@@ -23,7 +23,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts agent-colors-main.test.ts
 
-import type { HarnessDescriptor, SessionSnapshot } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot } from '../server/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 import { AGENT_PALETTE, agentColorOf, configureAgentColors, resetAgentColors } from './ui/agent-color';

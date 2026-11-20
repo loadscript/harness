@@ -84,7 +84,7 @@
 //   - ./ui/turns.ts          — the tile that mounts one bar per turn
 //   - ../styles.css          — `.context-bar*` rules (colors, gaps, the sr-only list)
 
-import type { ContextBlock } from '@underload/harness/shared/turn-display';
+import type { ContextBlock } from '../../shared/turn-display';
 import {
     CONTEXT_BAR_FALLBACK_WIDTH,
     CONTEXT_BAR_LABEL,

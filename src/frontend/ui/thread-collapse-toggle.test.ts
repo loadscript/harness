@@ -31,7 +31,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
 import { createTurnBoard } from './turns';
 import type { TurnHandle } from './turns';
 import type { SessionThreadEntry } from './threads';

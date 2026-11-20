@@ -28,7 +28,7 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts snapshot-invalid-threads-main.test.ts
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { HarnessDescriptor, SessionSnapshot } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot } from '../server/protocol';
 import { THREAD_TRANSCRIPT_SAVE_NOTE } from './ui/thread-transcript';
 import { viewAwareFetch } from './view-test-support';
 

@@ -30,8 +30,8 @@
 //      stamped with the LOCAL clock) must never outrank the server's `turn.upsert` for the
 //      same id, or the tile keeps the receipt's figures — no `usage`, so no token tally.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SessionSnapshot, SessionStreamItem, SessionTurn, SessionView } from '@underload/harness/server';
-import type { TurnSummary } from '@underload/harness/shared/turn-display';
+import type { SessionSnapshot, SessionStreamItem, SessionTurn, SessionView } from '../server/protocol';
+import type { TurnSummary } from '../shared/turn-display';
 import { listTurns } from './api';
 import { openSession } from './view-api';
 import { observeTurn, observeView } from './view-shell';

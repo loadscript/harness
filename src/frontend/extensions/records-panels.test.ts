@@ -25,8 +25,8 @@ import type {
     RecordChangeRow,
     RecordsDeltaResponse,
     RecordsSnapshotResponse
-} from '@underload/harness/shared/harness-api';
-import type { WsSubscriptionState, WsUpdateRecords } from '@underload/harness/shared/harness-stream';
+} from '../../shared/harness-api';
+import type { WsSubscriptionState, WsUpdateRecords } from '../../shared/harness-stream';
 import { clearShellPanels, listShellPanels } from './shell-panels';
 import { createPanelContext } from './context';
 import type { PanelApiOverrides, PanelContext, PanelSubscribe, PanelSubscriptionSpec } from './context';

@@ -20,7 +20,7 @@ import type {
     HarnessDescriptor,
     SessionSnapshot,
     SessionTurn
-} from '@underload/harness/server';
+} from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 import type { StreamDouble } from './view-test-support';

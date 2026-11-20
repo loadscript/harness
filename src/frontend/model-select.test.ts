@@ -17,8 +17,8 @@
 //     enabled and PATCH /sessions/:id, applying the returned snapshot, including
 //     while the session is running.
 
-import type { AgentRank } from '@underload/harness/types';
-import type { HarnessDescriptor, SessionSnapshot } from '@underload/harness/server';
+import type { AgentRank } from '../types';
+import type { HarnessDescriptor, SessionSnapshot } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

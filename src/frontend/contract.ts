@@ -39,7 +39,7 @@ import type {
     SessionSnapshot,
     SessionStreamItem,
     SessionTurn
-} from '@underload/harness/server';
+} from '../server/protocol';
 // N3 interaction/branch wire shapes live in the shared type barrel. They are read
 // structurally below so a server that predates them (or a malformed frame) cannot
 // make the transcript throw; the canonical types only anchor the return values.
@@ -49,7 +49,7 @@ import type {
     HarnessActionAnswer,
     HarnessActionChoice,
     HarnessActionRequest
-} from '@underload/harness/types';
+} from '../types';
 // The rank vocabulary as VALUES (the type-only import above cannot supply them). They are
 // aliased to `*Value` inside this module because the PUBLIC names are re-exported below for
 // the browser surfaces, and a local binding with the same name would shadow them.
@@ -58,7 +58,7 @@ import {
     isAgentRank as isAgentRankValue,
     isLowerRank as isLowerRankValue,
     rankIndexOf as rankIndexOfValue
-} from '@underload/harness/types';
+} from '../types';
 
 // Legacy fallback: the harness-owned core tools an OLD server (no `coreTools`)
 // declared. R21.2 removed the right-rail core dropdown and the tool catalogue that
@@ -146,7 +146,7 @@ const descriptorsOf = (descriptor: HarnessDescriptor): readonly string[] =>
 // ./ui/turns.ts — so this module re-exports them instead of keeping a second copy the
 // browser could drift away from. What lives HERE is only what the browser owns: the
 // label wording and the stepper arithmetic on top of the canonical ordering.
-export { AGENT_RANKS, isAgentRank, isLowerRank, rankIndexOf } from '@underload/harness/types';
+export { AGENT_RANKS, isAgentRank, isLowerRank, rankIndexOf } from '../types';
 
 // The two ends of the ladder as NAMES. A surface that has to say "Rank A is the highest"
 // or clamp a stepper reads these instead of hard-coding a letter, and ./view-test-support

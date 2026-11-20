@@ -28,7 +28,7 @@ import {
     HARNESS_PAGE_LIMIT,
     HARNESS_SERVICE_CAPABILITIES,
     HARNESS_SERVICE_LIMITS
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 import { LOCAL_AREA_NETWORK_HOST_NAME, STATIC_API_CANDIDATES, isStaticPagesHost } from './deployment';
 import { API_ROOT_STORAGE_KEY } from './api';
 

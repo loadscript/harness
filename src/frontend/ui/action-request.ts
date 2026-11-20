@@ -28,7 +28,7 @@
 // `.action-custom`, `.action-status`, `.action-error`). This module owns only the
 // DOM and state; networking/routing is the turn board's answer callback.
 
-import type { HarnessActionAnswer, HarnessActionChoice, HarnessActionRequest } from '@underload/harness/types';
+import type { HarnessActionAnswer, HarnessActionChoice, HarnessActionRequest } from '../../types';
 
 export type ActionCardState = 'pending' | 'submitting' | 'answered' | 'expired' | 'error';
 

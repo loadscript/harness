@@ -114,8 +114,8 @@
 //     roster (`bootstrap` below) — the playground runner's own temporary session is a separate
 //     conversation and is still created by the call itself.
 
-import type { HarnessDescriptor, SessionSnapshot, ToolDescriptor } from '@underload/harness/server';
-import type { SessionToolSummary } from '@underload/harness/shared/harness-api';
+import type { HarnessDescriptor, SessionSnapshot, ToolDescriptor } from '../server/protocol';
+import type { SessionToolSummary } from '../shared/harness-api';
 import type { SessionToolRowSeed } from './session-config-test-support';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { sessionConfigDouble, sessionToolPage, sessionToolRow } from './session-config-test-support';

@@ -21,7 +21,7 @@
 vi.mock('../api', () => ({ callTool: vi.fn() }));
 
 import { callTool } from '../api';
-import type { ToolCallResult } from '@underload/harness/server';
+import type { ToolCallResult } from '../../server/protocol';
 import type { FilePreviewReader } from './file-preview';
 import { createToolCallCard, type ToolCallCard } from './tools';
 

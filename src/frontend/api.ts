@@ -56,8 +56,8 @@
 // source 4 on purpose: an operator-built bundle with a baked-in `VITE_HARNESS_API`
 // must still be re-pointable from the UI without a rebuild.
 
-import { HARNESS_API_ROOT, HARNESS_EPOCH_HEADER, HARNESS_PAGE_LIMIT, HARNESS_REVISION_HEADER, HARNESS_ROUTES } from '@underload/harness/shared/harness-api';
-import { isTrustedRuntimeOrigin } from '@underload/harness/shared';
+import { HARNESS_API_ROOT, HARNESS_EPOCH_HEADER, HARNESS_PAGE_LIMIT, HARNESS_REVISION_HEADER, HARNESS_ROUTES } from '../shared/harness-api';
+import { isTrustedRuntimeOrigin } from '../shared';
 import { providerTimeoutsOf } from './provider-diagnostics';
 import type { ProviderTimeouts } from './provider-diagnostics';
 // The browser's own rank vocabulary. Only the roster/authority-map rule is needed at this
@@ -153,8 +153,8 @@ import type {
     // T7: the context segment's one writable field, and the receipt that write answers with.
     PatchTurnBlockRequest,
     TurnBlockWriteReceipt
-} from '@underload/harness/shared/harness-api';
-import type { AgentRank, HarnessEvent, HarnessUsage } from '@underload/harness/types';
+} from '../shared/harness-api';
+import type { AgentRank, HarnessEvent, HarnessUsage } from '../types';
 // The display subtree uses the GENERATED aliases in ../shared/harness-api (they ARE
 // ../shared/turn-display.ts's models). Naming them here is what makes this module's
 // returns "the wire contract", and ./display-project.ts is the single place that
@@ -166,7 +166,7 @@ import type {
     TurnDisplay,
     TurnStepDetail,
     TurnSummary
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 
 // ---------------------------------------------------------------------------
 // The boot document the shell renders

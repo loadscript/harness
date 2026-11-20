@@ -47,8 +47,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts src/frontend/display-project-blocks.test.ts
 
-import type { ContextBlock as WireContextBlock, TurnSection as WireTurnSection } from '@underload/harness/shared/harness-api';
-import type { ContextBlock } from '@underload/harness/shared/turn-display';
+import type { ContextBlock as WireContextBlock, TurnSection as WireTurnSection } from '../shared/harness-api';
+import type { ContextBlock } from '../shared/turn-display';
 import { describe, expect, it } from 'vitest';
 import { projectBlock, projectSection } from './display-project';
 

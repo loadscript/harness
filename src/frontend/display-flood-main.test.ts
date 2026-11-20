@@ -22,7 +22,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts display-flood-main.test.ts
 
-import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { bumpFixtureEpoch, viewAwareFetch } from './view-test-support';
 

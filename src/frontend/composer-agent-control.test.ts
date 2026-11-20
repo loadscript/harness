@@ -20,8 +20,8 @@
 //   - R13: closing restores focus to the composer button and a live rebuild keeps the
 //     open dialog (and the control the reader was using) in place.
 
-import type { AgentDescriptor, HarnessDescriptor, SessionSnapshot } from '@underload/harness/server';
-import type { AgentRank } from '@underload/harness/types';
+import type { AgentDescriptor, HarnessDescriptor, SessionSnapshot } from '../server/protocol';
+import type { AgentRank } from '../types';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 import type { StreamDouble } from './view-test-support';

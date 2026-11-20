@@ -105,7 +105,7 @@ import type {
     SessionSteerRecord,
     SessionThread,
     SessionTurn
-} from '@underload/harness/server';
+} from '../../server/protocol';
 import type { ThreadTranscriptPayload } from '../view-model';
 import { UNKNOWN_THREAD_LABEL, invalidThreadsOf, threadNameOf, turnThreadIdOf } from './threads';
 import type { InvalidThreadRecord, SessionThreadEntry } from './threads';
@@ -113,7 +113,7 @@ import type { InvalidThreadRecord, SessionThreadEntry } from './threads';
 // rebuild `id\0epoch` from the two BARE fields the roster publishes, so the composite never travels on a
 // wire and the browser resolves a contested id exactly the way the server attributed it
 // (../../server/protocol.ts `SessionThread.epoch`).
-import { invocationRunKeyOf } from '@underload/harness/shared/run-identity';
+import { invocationRunKeyOf } from '../../shared/run-identity';
 // The app's one payload viewer (line numbers + soft wrap + byte-exact text). It lives in
 // ./tools.ts next to the tool panes it was built for; see `readContent` below for why this
 // surface needs the `tool-code` class rather than its own.

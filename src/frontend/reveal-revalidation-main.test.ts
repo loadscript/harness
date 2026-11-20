@@ -26,7 +26,7 @@
 // Run: yarn vitest run --config src/frontend/vitest.config.ts reveal-revalidation-main.test.ts
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { HarnessDescriptor, SessionSnapshot, SessionThread, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionThread, SessionTurn } from '../server/protocol';
 import { viewAwareFetch } from './view-test-support';
 
 const SESSION_KEY = 'underload-harness-app:session';

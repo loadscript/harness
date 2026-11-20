@@ -36,7 +36,7 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/turns-run-epoch.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
 import { createTurnBoard, type TurnBoard } from './turns';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 

@@ -11,8 +11,8 @@
 //     add only a tiny kind tag;
 //   - the answer callback carries the captured requestId/choice/sessionId.
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
-import type { HarnessActionAnswer, HarnessActionChoice, HarnessActionRequest } from '@underload/harness/types';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
+import type { HarnessActionAnswer, HarnessActionChoice, HarnessActionRequest } from '../../types';
 import { createTurnBoard } from './turns';
 import type { AnswerActionInput, TurnHandle } from './turns';
 

@@ -36,27 +36,27 @@
 //                        `/views` route the client asks for, translated in both directions.
 //   - `viewAwareFetch` : the same adapter for a test that stubs `fetch(input, init)` directly.
 
-import type { AgentResultBlock, AgentResultTurn } from '@underload/harness/shared';
+import type { AgentResultBlock, AgentResultTurn } from '../shared';
 // The rank vocabulary comes from the kernel barrel, exactly where production reads it: the
 // double has no letter set of its own, so a fixture rank the guard rejects is no rank here
 // and on the wire alike.
-import type { AgentRank } from '@underload/harness/types';
-import { isAgentRank } from '@underload/harness/types';
+import type { AgentRank } from '../types';
+import { isAgentRank } from '../types';
 // `LOWEST_RANK` is the SERVER's rule for a member no rank map names (an agent has no
 // authority the definition did not grant it), and the double states it from the same
 // constant instead of writing 'Z' in three places (../shared/harness-api.ts
 // `SessionAgentBinding.rank`, ../shared/turn-display.ts `DisplayProjectContext.ranks`).
 import { LOWEST_RANK } from './contract';
-import { listAgentResultBlocks } from '@underload/harness/shared';
-import type { DisplayProjectContext, TurnDisplay, TurnDisplayOp, TurnProjector, TurnSummary } from '@underload/harness/shared/turn-display';
-import { createTurnProjector, projectTurn, DISPLAY_NO_TIMESTAMP } from '@underload/harness/server/turn-projector';
+import { listAgentResultBlocks } from '../shared';
+import type { DisplayProjectContext, TurnDisplay, TurnDisplayOp, TurnProjector, TurnSummary } from '../shared/turn-display';
+import { createTurnProjector, projectTurn, DISPLAY_NO_TIMESTAMP } from '../server/turn-projector';
 import {
     HARNESS_API_ROOT,
     HARNESS_PAGE_LIMIT,
     HARNESS_SERVICE_CAPABILITIES,
     HARNESS_SERVICE_LIMITS
-} from '@underload/harness/shared/harness-api';
-import { HARNESS_WS_STREAM_LIMITS } from '@underload/harness/shared/harness-stream';
+} from '../shared/harness-api';
+import { HARNESS_WS_STREAM_LIMITS } from '../shared/harness-stream';
 import { configureHarnessStream, harnessStream, resetHarnessStream } from './stream';
 import type { StreamSocket, StreamSocketFactory } from './stream';
 import type {
@@ -69,7 +69,7 @@ import type {
     SessionView,
     SessionViewStreamItem,
     SessionViewSummary
-} from '@underload/harness/server';
+} from '../server/protocol';
 
 // ---------------------------------------------------------------------------
 // The fold context (the same seeding the store performs)

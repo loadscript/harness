@@ -42,8 +42,8 @@
 // an explicit `socketFactory` double, and `createHarnessStream` reports a missing
 // global only when no factory was given.
 
-import { HARNESS_WS_SUBPROTOCOL } from '@underload/harness/shared/harness-api';
-import { HARNESS_WS_STREAM_LIMITS, isHarnessServerFrame } from '@underload/harness/shared/harness-stream';
+import { HARNESS_WS_SUBPROTOCOL } from '../shared/harness-api';
+import { HARNESS_WS_STREAM_LIMITS, isHarnessServerFrame } from '../shared/harness-stream';
 import type {
     WsClientMessage,
     WsProtocolError,
@@ -56,7 +56,7 @@ import type {
     WsSubscriptionState,
     WsUpdate,
     WsWelcome
-} from '@underload/harness/shared/harness-stream';
+} from '../shared/harness-stream';
 import { streamSocketUrl } from './api';
 
 // The minimum socket surface this client drives. Declared structurally (not as

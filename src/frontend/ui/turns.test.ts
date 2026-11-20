@@ -14,7 +14,7 @@
 // never a character count; see the `inline reasoning chips (think)` section below.
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
 import { agentColorOf } from './agent-color';
 import { createTurnBoard } from './turns';
 

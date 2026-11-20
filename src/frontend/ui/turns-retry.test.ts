@@ -27,9 +27,9 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts
 
-import type { HarnessEvent, SessionView } from '@underload/harness/server';
-import type { HarnessPendingTool } from '@underload/harness/types';
-import type { TurnDisplay, TurnDisplayOp, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { HarnessEvent, SessionView } from '../../server/protocol';
+import type { HarnessPendingTool } from '../../types';
+import type { TurnDisplay, TurnDisplayOp, TurnSummary } from '../../shared/turn-display';
 import { applyOpsToDisplay } from '../view-state';
 import { createTurnBoard } from './turns';
 

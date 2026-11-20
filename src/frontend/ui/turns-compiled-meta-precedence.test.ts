@@ -20,9 +20,9 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/turns-compiled-meta-precedence.test.ts
 
-import type { SessionView } from '@underload/harness/server';
-import type { HarnessPendingTool } from '@underload/harness/types';
-import type { DisplayStep, TurnDisplayOp, TurnSection, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { SessionView } from '../../server/protocol';
+import type { HarnessPendingTool } from '../../types';
+import type { DisplayStep, TurnDisplayOp, TurnSection, TurnSummary } from '../../shared/turn-display';
 import type { TurnBoard } from './turns';
 import { createTurnBoard } from './turns';
 import { applyOpsToDisplay } from '../view-state';

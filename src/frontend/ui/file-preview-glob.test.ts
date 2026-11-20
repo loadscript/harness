@@ -20,7 +20,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { glob } from '@underload/harness';
+import { glob } from './glob-test-support';
 import { filePreviewCandidatesOf, filePreviewGlobPattern, openFilePreview } from './file-preview';
 import type { FilePreviewReader } from './file-preview';
 

@@ -6,7 +6,7 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/preview.test.ts
 
 import { describe, expect, it } from 'vitest';
-import type { HarnessAttachment } from '@underload/harness/types';
+import type { HarnessAttachment } from '../../types';
 import {
     attachmentPreviewContent,
     enhanceImages,

@@ -4,7 +4,7 @@
 // tree per VISIBLE turn — never `/api`, never `/views`, never an SSE stream, never a
 // document assembled from the whole history.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HARNESS_PAGE_LIMIT } from '@underload/harness/shared/harness-api';
+import { HARNESS_PAGE_LIMIT } from '../shared/harness-api';
 import type {
     PendingActionListResponse,
     SessionResponse,
@@ -14,7 +14,7 @@ import type {
     SessionResource,
     ThreadSummary,
     TurnSummary as WireTurnSummary
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 import { loadOlderTurns, openSession, prependTurns, submitConversationTask, rowFromReceipt } from './view-api';
 import { pageParams } from './api';
 

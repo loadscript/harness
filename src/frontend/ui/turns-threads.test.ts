@@ -16,8 +16,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/turns-threads.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '@underload/harness/server';
-import { findLatestAgentResultBlock, listAgentResultBlocks } from '@underload/harness/shared';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn } from '../../server/protocol';
+import { findLatestAgentResultBlock, listAgentResultBlocks } from '../../shared';
 import { UNKNOWN_AGENT_COLOR, agentColorOf } from './agent-color';
 import { createTurnBoard } from './turns';
 import type { TurnHandle } from './turns';

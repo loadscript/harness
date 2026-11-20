@@ -33,7 +33,7 @@
 //   - attachment type/validation: ../../types, ../../shared/attachments
 //   - styles: src/frontend/styles.css (`.preview-*`)
 
-import type { HarnessAttachment } from '@underload/harness/types';
+import type { HarnessAttachment } from '../../types';
 import { attachmentKindText, attachmentThumbnailUrl } from './attachments';
 import { openDialog } from './dialog';
 import type { DialogHandle } from './dialog';

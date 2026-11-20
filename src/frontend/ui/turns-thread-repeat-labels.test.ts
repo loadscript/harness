@@ -61,8 +61,8 @@ import type {
     TurnDisplayOp,
     TurnSection,
     TurnSummary
-} from '@underload/harness/shared/turn-display';
-import type { HarnessEvent, SessionTurn, SessionView } from '@underload/harness/server';
+} from '../../shared/turn-display';
+import type { HarnessEvent, SessionTurn, SessionView } from '../../server/protocol';
 import { existsSync, readFileSync } from 'node:fs';
 import { applyOpsToDisplay } from '../view-state';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';

@@ -53,8 +53,6 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/agent-color.test.ts
 
 import type { AgentColor } from './agent-color';
-import { AGENT_PROFILE_NAMES } from '@underload/harness/server';
-import { presets } from '@underload/harness/server';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
     AGENT_PALETTE,
@@ -96,6 +94,10 @@ const CATALOGUE = [
     'debugger',
     'summarizer'
 ];
+
+// The UI is a standalone package, so this suite carries the server catalogue's
+// roster as a fixture instead of importing the server tree.
+const AGENT_PROFILE_NAMES = CATALOGUE;
 
 // The slots that catalogue lands on. Four of its keys hash onto an already-owned slot
 // (`instruct` 3, `planner` 3, `debugger` 6, `summarizer` 0 collide) and walk forward,
@@ -598,22 +600,9 @@ describe('palette shape (the largest live team fits; the catalogue may exceed it
     });
 
     it('keeps every live harness team pairwise distinct inside the eight slots', () => {
-        // The eight live cards (`presets`), in catalogue order — the fixtures are absent
-        // here, which is exactly why the catalogue is not the constraint. The eighth primary
-        // repeats `general`: the tool-less `chat` card (issue 0005-D) reuses the trusted
-        // General profile instead of adding a member, so it contributes NO new roster and the
-        // `LIVE_TEAMS` list below stays the seven distinct rosters the palette has to fit.
-        expect(presets.map((preset) => preset.entry)).toEqual([
-            'general',
-            'instruct',
-            'research',
-            'workspace',
-            'reviewer',
-            'planner',
-            'debugger',
-            'general'
-        ]);
-
+        // The eight live cards used to be read from the server catalogue. The UI is
+        // standalone, so `LIVE_TEAMS` itself is the fixture: seven distinct rosters
+        // plus the tool-less `chat` card, which reuses the General profile.
         // Member counts, per card: the planner roster is the largest there is and lands
         // exactly on the palette size, every other live card is smaller. A new specialist
         // (or a summarizer that joins twice) pushes this vector past 8 and fails. The `general`
@@ -625,12 +614,7 @@ describe('palette shape (the largest live team fits; the catalogue may exceed it
             resetAgentColors();
 
             // The members the module is configured with: the roster the shipped card declares
-            // itself (`agents`, entry agent first). `teamOf()` is gone with the role axis — the
-            // rank map (`ranks`) states who may delegate — so a changed roster shows up here
-            // instead of in a stale copy of the list.
-            const card = presets.find((preset) => preset.entry === team.entry);
-            expect(card?.agents).toEqual(team.members);
-
+            // itself (`agents`, entry agent first).
             configureAgentColors({ roster: team.members });
 
             // Exact slots for that roster, and pairwise distinct by construction: one

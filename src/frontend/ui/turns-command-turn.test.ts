@@ -24,7 +24,7 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/turns-command-turn.test.ts
 
 import { describe, expect, it } from 'vitest';
-import type { SessionTurn } from '@underload/harness/server';
+import type { SessionTurn } from '../../server/protocol';
 import { createTurnBoard } from './turns';
 
 const T = 1_700_000_000_000;

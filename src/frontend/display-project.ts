@@ -46,7 +46,7 @@ import type {
     TurnDisplay as WireTurnDisplay,
     TurnSection as WireTurnSection,
     TurnSummary as WireTurnSummary
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 import type {
     ContextBlock,
     DisplayNode,
@@ -60,8 +60,8 @@ import type {
     SectionDisplayState,
     TurnDisplay,
     TurnSection
-} from '@underload/harness/shared/turn-display';
-import { DISPLAY_PANEL_PREVIEW_CHARS, DISPLAY_PANEL_TITLE_CHARS } from '@underload/harness/shared/turn-display';
+} from '../shared/turn-display';
+import { DISPLAY_PANEL_PREVIEW_CHARS, DISPLAY_PANEL_TITLE_CHARS } from '../shared/turn-display';
 import type { TurnRowView } from './view-model';
 
 // Panels the compact render model holds per step, mirroring the projector's own

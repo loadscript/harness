@@ -21,7 +21,7 @@ import type {
     ThreadSummaryPage,
     TurnSummary,
     TurnSummaryPage
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 import { configureHarnessStream, harnessStream, resetHarnessStream } from './stream';
 import type { StreamSocket, StreamSocketFactory } from './stream';
 import { getRawSession, observeThread, observeView } from './view-shell';

@@ -153,7 +153,7 @@ import type {
     SessionTurn,
     SessionTurnStatus,
     SessionView
-} from '@underload/harness/server';
+} from '../../server/protocol';
 import type {
     HarnessActionAnswer,
     HarnessActionChoice,
@@ -162,11 +162,11 @@ import type {
     HarnessBranchSummary,
     HarnessToolCallProgress,
     HarnessToolOutcome
-} from '@underload/harness/types';
+} from '../../types';
 // The rank guard is the kernel's own (../../types/index.ts `isAgentRank`): one letter
 // A-Z or nothing. The browser never grows its own letter set, so a wire value the
 // projector did not stamp is read as "no rank" here exactly as it is server-side.
-import { isAgentRank } from '@underload/harness/types';
+import { isAgentRank } from '../../types';
 // The compiled display contract (T5 R1/R2/R3): the row, the tree, and the ops that
 // mutate both. TYPE-only for the tree shapes, plus the two DOM-free helpers the
 // renderer needs — nothing here pulls in a server-side fold.
@@ -185,7 +185,7 @@ import type {
     TurnSection,
     TurnStepDetail,
     TurnSummary
-} from '@underload/harness/shared/turn-display';
+} from '../../shared/turn-display';
 import { displayOf as displayOfView, isNewerSummary, sectionsOf, summariesOf } from '../view-state';
 import { stepDetailPayloadOf } from '../view-detail';
 // T11 (R7/R8): the ONE context bar. The model/geometry lives in ../view-context.ts (pure),
@@ -259,7 +259,7 @@ import { createAgentLabels } from './agent-label';
 // in its allocator (root `turn.threadLabel` and child `threadLabels[id]`), so a
 // same-code fallback invocation continues AFTER it (`RR1` + child `RR2`) instead of
 // re-minting `RR1`. The board must consume the SAME parser and reservation rule.
-import { agentLabelParts } from '@underload/harness/shared';
+import { agentLabelParts } from '../../shared';
 import type { AgentBlockDescriptor } from './references';
 // R5: the shared accessible Copy affordance (icon + success/error feedback + the
 // insecure-origin clipboard fallback that keeps an open dialog's focus trap alive).

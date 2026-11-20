@@ -134,8 +134,8 @@
 //   - src/frontend/ui/dialog.ts        modal stack/focus/scroll lock
 //   - src/frontend/ui/agent-dialog.css `.agent-dialog*`
 
-import type { AgentRank } from '@underload/harness/types';
-import type { AgentDescriptor } from '@underload/harness/server';
+import type { AgentRank } from '../../types';
+import type { AgentDescriptor } from '../../server/protocol';
 // One source for rank wording, validation and stepping (R20) — see contract.ts.
 import { AGENT_RANKS, isAgentRank, rankLabelOf } from '../contract';
 import {

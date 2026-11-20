@@ -39,7 +39,7 @@ import type {
     TurnDisplayOp,
     TurnSection,
     TurnSummary
-} from '@underload/harness/shared/turn-display';
+} from '../shared/turn-display';
 import type { HarnessPendingTool } from './contract';
 import type {
     SessionThread,
@@ -47,7 +47,7 @@ import type {
     SessionViewStreamItem,
     SessionViewSummary,
     SubmitTaskViewResult
-} from '@underload/harness/server';
+} from '../server/protocol';
 
 // ---------------------------------------------------------------------------
 // Read helpers (every access to the compiled document goes through one of these)

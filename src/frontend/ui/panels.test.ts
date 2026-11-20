@@ -8,8 +8,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts
 
-import type { SessionTurn } from '@underload/harness/server';
-import type { DisplayPanelSummary } from '@underload/harness/shared/turn-display';
+import type { SessionTurn } from '../../server/protocol';
+import type { DisplayPanelSummary } from '../../shared/turn-display';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
     PANEL_LIMITS,

@@ -10,7 +10,7 @@ import type {
     SessionSnapshot,
     SessionStreamItem,
     SessionTurn
-} from '@underload/harness/server';
+} from '../server/protocol';
 import {
     agentColorsOf,
     agentInstructionsOf,

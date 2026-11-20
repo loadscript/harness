@@ -52,8 +52,8 @@ import type {
     SessionToolPage,
     SessionToolSummary,
     UpdateSessionToolRequest
-} from '@underload/harness/shared/harness-api';
-import { HARNESS_API_ROOT } from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
+import { HARNESS_API_ROOT } from '../shared/harness-api';
 
 // A row the caller describes in the few fields the panes actually read; everything else is the
 // shape a catalogue projection carries anyway, so the defaults keep the payload legal.

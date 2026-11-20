@@ -30,7 +30,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { ContextBlock } from '@underload/harness/shared/turn-display';
+import type { ContextBlock } from '../../shared/turn-display';
 import type { BlockDetailPayload } from '../view-detail';
 import { BLOCK_DETAIL_TEXT_CLASS, blockDetailPanesFor } from './context-detail';
 import {

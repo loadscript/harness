@@ -13,13 +13,13 @@
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RecordsSignal } from '@underload/harness/shared/harness-api';
+import type { RecordsSignal } from '../../shared/harness-api';
 import type {
     WsResyncRequired,
     WsSubscriptionState,
     WsUpdateRecords,
     WsUpdateSession
-} from '@underload/harness/shared/harness-stream';
+} from '../../shared/harness-stream';
 import type { PanelSubscriptionSpec, PanelSubscribe } from './context';
 import {
     attachRecordsWake,

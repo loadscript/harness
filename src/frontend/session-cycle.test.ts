@@ -46,7 +46,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { viewAwareFetch } from './view-test-support';
 
 const SESSION_KEY = 'underload-harness-app:session';

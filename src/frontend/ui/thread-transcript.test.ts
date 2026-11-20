@@ -57,7 +57,7 @@ import type {
     SessionSnapshot,
     SessionThread,
     SessionTurn
-} from '@underload/harness/server';
+} from '../../server/protocol';
 import type { SessionThreadEntry } from './threads';
 import { sessionThreadsOf } from './threads';
 import { threadDeleteProtectionOf, threadSubtreeIdsOf } from './turns';

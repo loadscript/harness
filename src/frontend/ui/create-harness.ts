@@ -17,8 +17,8 @@
 //   - src/frontend/main.ts — mounts the panel, appends the returned descriptor
 //   - src/frontend/styles.css — `.create-harness`, `.create-*`
 
-import type { AgentRank } from '@underload/harness/types';
-import type { AgentDescriptor, CreateHarnessRequest } from '@underload/harness/server';
+import type { AgentRank } from '../../types';
+import type { AgentDescriptor, CreateHarnessRequest } from '../../server/protocol';
 import { HIGHEST_RANK, LOWEST_RANK, rankLabelOf, stepRank } from '../contract';
 
 export type CreateHarnessOptions = {

@@ -15,19 +15,19 @@
 // row op, a `display.ops` becomes projected ops, and an invalidation or a gap
 // becomes a re-read of the LOADED WINDOW, never a history snapshot. Aborting it
 // unsubscribes; it never cancels a task (rule 7 of ./stream.ts).
-import { HARNESS_ROUTES } from '@underload/harness/shared/harness-api';
+import { HARNESS_ROUTES } from '../shared/harness-api';
 import type {
     ActionChoiceInput,
     PendingAction,
     RunnerSettingsInput,
     SessionSummary,
     TaskReceipt
-} from '@underload/harness/shared/harness-api';
-import type { HarnessActionChoice } from '@underload/harness/types';
+} from '../shared/harness-api';
+import type { HarnessActionChoice } from '../types';
 // The shell's OWN provider record (camelCase). Type-only import, the same convention
 // ./main.ts:96-109 already follows for `../server/protocol`.
-import type { RunnerSettings } from '@underload/harness/server';
-import type { TurnDisplay, TurnDisplayOp, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { RunnerSettings } from '../server/protocol';
+import type { TurnDisplay, TurnDisplayOp, TurnSummary } from '../shared/turn-display';
 import {
     answerAction,
     apiUrl,
@@ -85,7 +85,7 @@ import type {
     WsUpdateSession,
     WsUpdateThreadUpsert,
     WsUpdateTurnUpsert
-} from '@underload/harness/shared/harness-stream';
+} from '../shared/harness-stream';
 import type { ThreadTranscriptPayload } from './view-model';
 
 
@@ -1221,7 +1221,7 @@ export const getRawSession = async (
     // the export — it is removed from everything that is not an export (./main.ts: a load
     // reads no transcript, an expanded thread reads its own).
     threadIds?: readonly string[]
-): Promise<import('@underload/harness/server').SessionSnapshot> => {
+): Promise<import('../server/protocol').SessionSnapshot> => {
     const [session, page, roster] = await Promise.all([
         getSession(sessionId),
         turnIds === undefined || turnIds.length === 0
@@ -1287,22 +1287,22 @@ export const getRawSession = async (
         updatedAt: session.updated_at,
         ...(session.agent_models === undefined ? {} : { agentModels: { ...session.agent_models } }),
         ...(session.last_error === undefined ? {} : { lastError: session.last_error }),
-        turns: rawTurns as unknown as import('@underload/harness/server').SessionTurn[],
+        turns: rawTurns as unknown as import('../server/protocol').SessionTurn[],
         threads: roster.items.map((row) => ({
             ...threadRowOf(row),
             // The transcript's committed messages, read above through `readTranscript` per
             // thread: the document belongs on the thread the dialog is about to open, and the
             // roster row alone carries only its signals.
             messages: transcripts.get(row.id)?.messages ?? []
-        })) as unknown as import('@underload/harness/server').SessionThread[],
-        threadViews: rosterRows as unknown as import('@underload/harness/server').SessionThreadView[],
+        })) as unknown as import('../server/protocol').SessionThread[],
+        threadViews: rosterRows as unknown as import('../server/protocol').SessionThreadView[],
         // The break, with its bytes: `invalidThreadsOf` derives the verdict from the roster row,
         // and the document read supplies the value the editor quotes (`messages`).
         invalidThreads: invalidThreadsOf(rosterRows).map((entry) => ({
             ...entry,
             messages: storedValueOf(entry.id)
-        })) as unknown as import('@underload/harness/server').SessionInvalidThread[]
-    } as unknown as import('@underload/harness/server').SessionSnapshot;
+        })) as unknown as import('../server/protocol').SessionInvalidThread[]
+    } as unknown as import('../server/protocol').SessionSnapshot;
 };
 
 // ---------------------------------------------------------------------------

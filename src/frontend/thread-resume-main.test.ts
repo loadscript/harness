@@ -31,8 +31,8 @@ import type {
     SessionSnapshot,
     SessionThread,
     SessionTurn
-} from '@underload/harness/server';
-import type { TaskReceipt } from '@underload/harness/shared/harness-api';
+} from '../server/protocol';
+import type { TaskReceipt } from '../shared/harness-api';
 import { viewAwareFetch } from './view-test-support';
 
 const T = 1_700_000_000_000;

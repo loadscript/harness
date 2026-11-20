@@ -12,8 +12,8 @@
 //   - history grows ONLY from the cursor the server issued, exactly one page per
 //     call, and the affordance reports when there is nothing older to ask for.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TurnSummary as WireTurnSummary } from '@underload/harness/shared/harness-api';
-import type { TurnDisplay } from '@underload/harness/shared/turn-display';
+import type { TurnSummary as WireTurnSummary } from '../shared/harness-api';
+import type { TurnDisplay } from '../shared/turn-display';
 import { createDisplayLoader } from './view-api';
 import { createDisplayPlane } from './view-shell';
 import type { SessionView } from './view-model';

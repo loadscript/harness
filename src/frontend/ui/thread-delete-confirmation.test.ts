@@ -31,7 +31,7 @@ import type {
     SessionSnapshot,
     SessionThread,
     SessionTurn
-} from '@underload/harness/server';
+} from '../../server/protocol';
 import type { TurnBoard, TurnHandle } from './turns';
 import { createTurnBoard } from './turns';
 import { sessionThreadsOf } from './threads';

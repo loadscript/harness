@@ -9,7 +9,7 @@
 //   - a non-root (autoanswer/fork) request is read-only with no human buttons;
 //   - expiry is terminal and an authoritative answer still wins.
 
-import type { HarnessActionAnswer, HarnessActionRequest } from '@underload/harness/types';
+import type { HarnessActionAnswer, HarnessActionRequest } from '../../types';
 import { actionChoiceText, createActionRequestCard } from './action-request';
 
 const request = (overrides: Partial<HarnessActionRequest> = {}): HarnessActionRequest => ({

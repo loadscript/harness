@@ -33,12 +33,12 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/turns-tail-server.test.ts
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { HarnessEvent } from '@underload/harness';
-import { DISPLAY_ARGS_PREVIEW_CHARS, DISPLAY_NODE_PREVIEW_CHARS, DISPLAY_PREVIEW_CHARS } from '@underload/harness/shared/turn-display';
-import type { TurnDisplayOp } from '@underload/harness/shared/turn-display';
-import type { SessionTurn, SessionView } from '@underload/harness/server';
-import { createTurnProjector, projectTurn } from '@underload/harness/server/turn-projector';
-import type { HarnessPendingTool } from '@underload/harness/types';
+import type { HarnessEvent } from '../../types';
+import { DISPLAY_ARGS_PREVIEW_CHARS, DISPLAY_NODE_PREVIEW_CHARS, DISPLAY_PREVIEW_CHARS } from '../../shared/turn-display';
+import type { TurnDisplayOp } from '../../shared/turn-display';
+import type { SessionTurn, SessionView } from '../../server/protocol';
+import { createTurnProjector, projectTurn } from '../../server/turn-projector';
+import type { HarnessPendingTool } from '../../types';
 import { createTurnBoard } from './turns';
 import type { TurnBoard } from './turns';
 import { applyOpsToDisplay } from '../view-state';

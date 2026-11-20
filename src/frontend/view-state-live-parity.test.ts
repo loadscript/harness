@@ -28,11 +28,11 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-state-live-parity.test.ts
 
-import type { HarnessEvent } from '@underload/harness';
-import type { DisplayProjectContext, TurnDisplay, TurnDisplayOp } from '@underload/harness/shared/turn-display';
-import { createTurnProjector } from '@underload/harness/server/turn-projector';
-import type { SessionTurn } from '@underload/harness/server';
-import type { HarnessPendingTool } from '@underload/harness/types';
+import type { HarnessEvent } from '../types';
+import type { DisplayProjectContext, TurnDisplay, TurnDisplayOp } from '../shared/turn-display';
+import { createTurnProjector } from '../server/turn-projector';
+import type { SessionTurn } from '../server/protocol';
+import type { HarnessPendingTool } from '../types';
 import { describe, expect, it } from 'vitest';
 import { applyOpToDisplay, type PendingSections } from './view-state';
 import { contextBarOf } from './view-context';

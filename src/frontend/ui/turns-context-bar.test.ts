@@ -18,8 +18,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/turns-context-bar.test.ts
 
-import type { SessionView } from '@underload/harness/server';
-import type { HarnessPendingTool } from '@underload/harness/types';
+import type { SessionView } from '../../server/protocol';
+import type { HarnessPendingTool } from '../../types';
 import type {
     ContextBlock,
     TurnBlockDetail,
@@ -27,7 +27,7 @@ import type {
     TurnDisplayOp,
     TurnSection,
     TurnSummary
-} from '@underload/harness/shared/turn-display';
+} from '../../shared/turn-display';
 import type { TurnBoard } from './turns';
 import { createTurnBoard } from './turns';
 import { applyOpsToDisplay } from '../view-state';

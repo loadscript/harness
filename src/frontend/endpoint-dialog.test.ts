@@ -65,9 +65,9 @@ import type {
     HarnessDescriptor,
     SessionSnapshot,
     SessionTurn
-} from '@underload/harness/server';
+} from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { HARNESS_API_ROOT } from '@underload/harness/shared/harness-api';
+import { HARNESS_API_ROOT } from '../shared/harness-api';
 import { API_ROOT } from './api';
 import { STATIC_API_CANDIDATES } from './deployment';
 import { viewAwareFetch } from './view-test-support';

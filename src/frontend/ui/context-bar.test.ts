@@ -40,7 +40,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/context-bar.test.ts
 
-import type { ContextBlock } from '@underload/harness/shared/turn-display';
+import type { ContextBlock } from '../../shared/turn-display';
 import type { ContextBarModel } from '../view-context';
 import {
     CONTEXT_BAR_GAP_PX,

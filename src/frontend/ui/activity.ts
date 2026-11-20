@@ -59,8 +59,8 @@
 // conic-gradient arc rotated by a registered custom property and masked into a 1px
 // ring.
 
-import type { HarnessEvent, SessionTurn } from '@underload/harness/server';
-import type { TurnDisplay, TurnDisplayOp, TurnSection } from '@underload/harness/shared/turn-display';
+import type { HarnessEvent, SessionTurn } from '../../server/protocol';
+import type { TurnDisplay, TurnDisplayOp, TurnSection } from '../../shared/turn-display';
 import { eventTimesOf, pendingOf, wakeupOf } from '../contract';
 import { sectionsOf } from '../view-state';
 import { elapsedBetween, quietGradeOf, type QuietGrade } from './time';

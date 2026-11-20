@@ -24,7 +24,7 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/thread-transcript-invalid-source.test.ts
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { HarnessMessage, SessionSnapshot, SessionThread, SessionTurn } from '@underload/harness/server';
+import type { HarnessMessage, SessionSnapshot, SessionThread, SessionTurn } from '../../server/protocol';
 import { sessionThreadsOf } from './threads';
 import { createTurnBoard } from './turns';
 import type { TurnBoard } from './turns';

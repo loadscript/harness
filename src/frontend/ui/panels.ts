@@ -63,8 +63,8 @@
 //   - src/frontend/ui/turns.ts — renders the tool cards the panels accompany
 //   - src/frontend/styles.css — `.panel-host`, `.panel`, `.panel-table`
 
-import type { SessionTurn, ToolUiBlock, ToolUiPanel } from '@underload/harness/server';
-import type { DisplayPanelSummary } from '@underload/harness/shared/turn-display';
+import type { SessionTurn, ToolUiBlock, ToolUiPanel } from '../../server/protocol';
+import type { DisplayPanelSummary } from '../../shared/turn-display';
 // The kind registry: the only extension module this file needs at RUNTIME. It is a
 // one-way edge (`../extensions/panel-kinds.ts` imports only TYPES from here), so the
 // two modules can be reasoned about — and tested — separately, and neither can pull

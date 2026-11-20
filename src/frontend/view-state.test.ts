@@ -18,7 +18,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-state.test.ts
 
-import type { HarnessPendingTool } from '@underload/harness/types';
+import type { HarnessPendingTool } from '../types';
 import type {
     DisplayBlockSummary,
     DisplayNode,
@@ -28,8 +28,8 @@ import type {
     TurnDisplayOp,
     TurnSection,
     TurnSummary
-} from '@underload/harness/shared/turn-display';
-import type { SessionView, SubmitTaskViewResult } from '@underload/harness/server';
+} from '../shared/turn-display';
+import type { SessionView, SubmitTaskViewResult } from '../server/protocol';
 import { describe, expect, it } from 'vitest';
 import {
     activeAgentsOf,

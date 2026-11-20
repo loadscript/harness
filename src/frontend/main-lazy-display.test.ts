@@ -22,7 +22,7 @@
 // Run: npx vitest run --config src/frontend/vitest.config.ts main-lazy-display.test.ts
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { viewAwareFetch } from './view-test-support';
 import { resetHarnessStream } from './stream';
 

@@ -12,7 +12,7 @@
 // folds each RAW frame through the server's own projector (`toViewItem`) and delivers the
 // `turn.upsert`/`display.ops`/`session.updated` frames the real stream would send.
 
-import type { HarnessDescriptor, HarnessEvent, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, HarnessEvent, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { bumpFixtureEpoch, viewAwareFetch } from './view-test-support';
 import type { HarnessStreamOptions, StreamDouble } from './view-test-support';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';

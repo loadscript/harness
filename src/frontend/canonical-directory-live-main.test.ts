@@ -49,7 +49,7 @@
 // Run (focused):
 //   npx vitest run --config src/frontend/vitest.config.ts canonical-directory-live-main.test.ts
 
-import type { HarnessDescriptor, HarnessEvent, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, HarnessEvent, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

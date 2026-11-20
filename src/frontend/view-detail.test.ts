@@ -12,8 +12,8 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-detail.test.ts
 
-import type { HarnessEvent } from '@underload/harness/types';
-import type { ContextBlock, ContextBlockKind, TurnBlockDetail, TurnStepDetail } from '@underload/harness/shared/turn-display';
+import type { HarnessEvent } from '../types';
+import type { ContextBlock, ContextBlockKind, TurnBlockDetail, TurnStepDetail } from '../shared/turn-display';
 import { describe, expect, it } from 'vitest';
 import { blockDetailPayloadOf, isBlockDetail, isStepDetail, stepDetailPayloadOf } from './view-detail';
 

@@ -6,7 +6,7 @@
 // return undefined instead of inventing fields. `threadOf` also keeps the new
 // `kind`/`branchId` metadata so fork/autoanswer rows can be labelled.
 
-import type { HarnessEvent } from '@underload/harness/server';
+import type { HarnessEvent } from '../server/protocol';
 import {
     actionAnswerEventOf,
     actionAnswerOf,

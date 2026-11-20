@@ -33,7 +33,7 @@
 // The field's growth math is unit-tested in ui/composer.test.ts; here the textarea's
 // `scrollHeight` is stubbed because jsdom has no layout.
 
-import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 

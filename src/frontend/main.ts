@@ -112,9 +112,9 @@ import type {
     SessionViewStreamItem,
     SessionViewSummary,
     ToolDescriptor
-} from '@underload/harness/server';
-import type { AgentRank, HarnessUsage } from '@underload/harness/types';
-import type { DisplayStep, TurnDisplayOp, TurnSummary, TurnStepDetail, TurnBlockDetail } from '@underload/harness/shared/turn-display';
+} from '../server/protocol';
+import type { AgentRank, HarnessUsage } from '../types';
+import type { DisplayStep, TurnDisplayOp, TurnSummary, TurnStepDetail, TurnBlockDetail } from '../shared/turn-display';
 // The pending-tool figure a cold display tree states per section (./view-api.ts
 // `readTurnDisplayWithPending`), seeded into the store as the `pending:set` ops it
 // would have arrived as on a live connection.
@@ -122,7 +122,7 @@ import type { DisplayStep, TurnDisplayOp, TurnSummary, TurnStepDetail, TurnBlock
 // `loadAgentPresetTexts`): the ONLY response that states an agent's preset
 // instruction text, because `GET /agents` rows are text-free summaries
 // (../shared/harness-api.ts:552-563).
-import type { AgentProfile, HarnessInstructionSummaryEntry, HarnessPendingTool, PluginSetting, PluginSummary, SessionToolSummary, TaskReceipt, ToolDetail } from '@underload/harness/shared/harness-api';
+import type { AgentProfile, HarnessInstructionSummaryEntry, HarnessPendingTool, PluginSetting, PluginSummary, SessionToolSummary, TaskReceipt, ToolDetail } from '../shared/harness-api';
 // The display wire (T5) is the shell's DEFAULT surface: every fetch, every stream
 // and every submit below speaks `/views`, so no round trip on this path can carry a
 // recorded event. The raw client (./api.ts) stays imported for the catalogue routes
@@ -220,8 +220,8 @@ import {
 // The unwrap of ONE lazy step detail (explicit clicks only): the panel expansion and
 // the tool chip's detail loader are its only callers.
 import { stepDetailPayloadOf } from './view-detail';
-import type { HarnessActionChoice, HarnessActionRequest, HarnessAttachment } from '@underload/harness/types';
-import { validateAttachments } from '@underload/harness/shared';
+import type { HarnessActionChoice, HarnessActionRequest, HarnessAttachment } from '../types';
+import { validateAttachments } from '../shared';
 import {
     API_ROOT,
     answerAction,

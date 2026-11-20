@@ -31,7 +31,7 @@ import type {
     SessionSnapshot,
     SessionThread,
     SessionTurn
-} from '@underload/harness/server';
+} from '../server/protocol';
 import { viewAwareFetch } from './view-test-support';
 
 const T = 1_700_000_000_000;

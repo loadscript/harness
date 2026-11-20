@@ -42,7 +42,7 @@
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { withViewRoutes } from './view-test-support';
-import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, SessionTurn } from '../server/protocol';
 
 const SESSION_KEY = 'underload-harness-app:session';
 // The stored endpoint settings (main.ts `loadSettings`): seeding this key is the only way a

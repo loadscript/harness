@@ -20,7 +20,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-state-context.test.ts
 
-import type { ContextBlock, ContextBlockPatch, DisplayNode, TurnDisplay, TurnDisplayOp, TurnSection } from '@underload/harness/shared/turn-display';
+import type { ContextBlock, ContextBlockPatch, DisplayNode, TurnDisplay, TurnDisplayOp, TurnSection } from '../shared/turn-display';
 import { applyOpToDisplay, applyOpsToActivity } from './view-state';
 import { describe, expect, it } from 'vitest';
 

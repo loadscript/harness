@@ -30,7 +30,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts view-shell-create.test.ts
 
-import type { SessionResource, SessionResponse } from '@underload/harness/shared/harness-api';
+import type { SessionResource, SessionResponse } from '../shared/harness-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createView } from './view-shell';
 

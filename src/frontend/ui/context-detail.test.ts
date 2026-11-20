@@ -20,7 +20,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts ui/context-detail.test.ts
 
-import type { ContextBlock, StepDisplayState, TurnBlockDetail } from '@underload/harness/shared/turn-display';
+import type { ContextBlock, StepDisplayState, TurnBlockDetail } from '../../shared/turn-display';
 import type { BlockInclusionWriteInput } from './context-detail';
 import {
     blockDetailCacheSize,

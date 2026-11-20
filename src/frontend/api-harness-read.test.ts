@@ -21,7 +21,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts api-harness-read.test.ts
 
-import type { HarnessDefinition, HarnessDefinitionResponse } from '@underload/harness/shared/harness-api';
+import type { HarnessDefinition, HarnessDefinitionResponse } from '../shared/harness-api';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getHarness, getHarnessInstructionIndex, getHarnessInstructionText } from './api';
 

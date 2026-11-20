@@ -79,7 +79,7 @@ import type {
     RecordFieldDescriptor,
     RecordsDeltaResponse,
     RecordsSnapshotResponse
-} from '@underload/harness/shared/harness-api';
+} from '../../shared/harness-api';
 import { readRecordsDelta, readRecordsSnapshot } from '../view-api';
 
 // The client-side cap on the accumulated feed. The STORE retains 200 events

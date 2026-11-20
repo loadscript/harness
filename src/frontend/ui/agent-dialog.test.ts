@@ -43,7 +43,7 @@
 //
 // Every assertion names the exact expected value — see the deterministic rule.
 
-import type { AgentDescriptor } from '@underload/harness/server';
+import type { AgentDescriptor } from '../../server/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openAgentDialog } from './agent-dialog';
 import type { AgentApplyResult, AgentConfigurationApply, AgentDialog, AgentDialogOptions } from './agent-dialog';

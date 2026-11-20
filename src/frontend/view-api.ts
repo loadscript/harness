@@ -47,7 +47,7 @@
 //      each record into the member its `op` names, filling `turnId` from the frame
 //      and dropping an op whose target ids are missing — no unsafe cast that hides
 //      a field the reducer would have needed.
-import { HARNESS_ROUTES } from '@underload/harness/shared/harness-api';
+import { HARNESS_ROUTES } from '../shared/harness-api';
 import type {
     HarnessActionRequest,
     PendingAction,
@@ -76,13 +76,13 @@ import type {
     HarnessPendingTool,
     TurnSection as WireTurnSection,
     TurnSummary as WireTurnSummary
-} from '@underload/harness/shared/harness-api';
+} from '../shared/harness-api';
 import type {
     TurnBlockDetail as InternalTurnBlockDetail,
     TurnDisplay,
     TurnDisplayOp,
     TurnStepDetail as InternalTurnStepDetail
-} from '@underload/harness/shared/turn-display';
+} from '../shared/turn-display';
 // T3: the per-thread transcript payload the transcript loader below holds. Type-only, so
 // it is erased at build time (the same convention `readTranscript` follows with its inline
 // `import('./view-model')` annotation).
@@ -136,12 +136,12 @@ import {
 } from './api';
 import type { InvalidThreadRow, RawTurnDocument, SessionView, ThreadRow, TurnRowView } from './view-model';
 // The instance key the shell renders a conversation with (`ensureInstance`, ./main.ts).
-import type { HarnessDescriptor } from '@underload/harness/server';
+import type { HarnessDescriptor } from '../server/protocol';
 // The rank vocabulary (../types/index.ts `AgentRank`/`isAgentRank`): the frozen descriptor's
 // `ranks` map is validated member by member, so a definition read that carries a stray value
 // cannot smuggle it into a required `Record<string, AgentRank>`.
-import type { AgentRank } from '@underload/harness/types';
-import { isAgentRank } from '@underload/harness/types';
+import type { AgentRank } from '../types';
+import { isAgentRank } from '../types';
 
 // Re-exported so the shell and the `ui/` renderers import the render model from the
 // facade that produces it, and there is one place to look for its shape.

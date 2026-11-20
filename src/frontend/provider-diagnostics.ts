@@ -38,7 +38,7 @@
 // (../server/turn-projector.ts:2636-2658, ../ui/turns-retry.test.ts:742), and durations
 // come from ./ui/time.ts `formatDuration` so 32000 reads `32.0s` everywhere.
 
-import type { HarnessErrorInfo, HarnessProviderAttemptDiagnostics } from '@underload/harness/types';
+import type { HarnessErrorInfo, HarnessProviderAttemptDiagnostics } from '../types';
 import { formatDuration } from './ui/time';
 
 // The two classes the transport emits (../transport/provider-timeouts.ts). `errorClass`

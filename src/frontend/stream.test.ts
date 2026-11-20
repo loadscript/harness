@@ -16,7 +16,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHarnessStream } from './stream';
 import type { StreamSocket, StreamSocketFactory } from './stream';
-import type { WsServerMessage } from '@underload/harness/shared/harness-stream';
+import type { WsServerMessage } from '../shared/harness-stream';
 
 // The socket double: it records what was sent and lets the test deliver a frame.
 type Probe = StreamSocket & { sent: string[]; deliver(value: unknown): void };

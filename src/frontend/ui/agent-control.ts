@@ -71,7 +71,7 @@
 //   - src/frontend/ui/agent-label.ts agentCodeOf (shared threading code)
 //   - src/frontend/styles.css       `.agent-control*`, `.composer-controls`
 
-import type { AgentDescriptor } from '@underload/harness/server';
+import type { AgentDescriptor } from '../../server/protocol';
 import { createPressHold } from './press-hold';
 import { paintAgentColor } from './agent-color';
 import { agentCodeOf } from './agent-label';

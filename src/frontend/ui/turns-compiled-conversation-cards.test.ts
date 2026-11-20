@@ -25,8 +25,8 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/turns-compiled-conversation-cards.test.ts
 
-import type { SessionView } from '@underload/harness/server';
-import type { HarnessPendingTool } from '@underload/harness/types';
+import type { SessionView } from '../../server/protocol';
+import type { HarnessPendingTool } from '../../types';
 import type {
     ContextBlock,
     DisplayNode,
@@ -34,7 +34,7 @@ import type {
     TurnDisplayOp,
     TurnSection,
     TurnSummary
-} from '@underload/harness/shared/turn-display';
+} from '../../shared/turn-display';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { applyOpsToDisplay } from '../view-state';

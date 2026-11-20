@@ -44,9 +44,9 @@
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/turns-deleted-threads.test.ts
 
-import type { HarnessAssistantMessage, HarnessEvent, SessionTurn, SessionView } from '@underload/harness/server';
-import type { SessionResource } from '@underload/harness/shared/harness-api';
-import type { DisplayTextNode, TurnDisplay, TurnSection, TurnSummary } from '@underload/harness/shared/turn-display';
+import type { HarnessAssistantMessage, HarnessEvent, SessionTurn, SessionView } from '../../server/protocol';
+import type { SessionResource } from '../../shared/harness-api';
+import type { DisplayTextNode, TurnDisplay, TurnSection, TurnSummary } from '../../shared/turn-display';
 import type { SessionThreadEntry } from './threads';
 import { sessionThreadsOf } from './threads';
 // The one place `inactive_thread_ids` becomes `inactiveThreads` (./view-api.ts `sessionViewOf`), so the

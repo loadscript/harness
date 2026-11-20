@@ -28,7 +28,7 @@
 //   - main.ts          — popup, debounced `glob` lookup, submit references
 
 import type { InlineChip } from './editor';
-import type { AgentResultBlock } from '@underload/harness/shared';
+import type { AgentResultBlock } from '../../shared';
 
 // One block a user can reference. This is EXACTLY the shared descriptor
 // (shared/agent-results.ts `AgentResultBlock`) so the popup, the submitted

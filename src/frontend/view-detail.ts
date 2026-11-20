@@ -34,8 +34,8 @@
 //   - ./view-context.ts              — the bar's segment model (shared duration rule)
 //   - ./contract.ts                  — the field accessors reused here
 
-import type { HarnessEvent, HarnessToolOutcome, HarnessActionRequest, HarnessActionAnswer, ToolMediaDescriptor, ToolUiPanel } from '@underload/harness/types';
-import type { ContextBlock, ContextBlockKind, TurnBlockDetail, TurnStepDetail } from '@underload/harness/shared/turn-display';
+import type { HarnessEvent, HarnessToolOutcome, HarnessActionRequest, HarnessActionAnswer, ToolMediaDescriptor, ToolUiPanel } from '../types';
+import type { ContextBlock, ContextBlockKind, TurnBlockDetail, TurnStepDetail } from '../shared/turn-display';
 import { actionAnswerEventOf, toolDurationOf } from './contract';
 import { contextBlockDurationOf } from './view-context';
 

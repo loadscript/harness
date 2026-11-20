@@ -28,7 +28,7 @@
  */
 /** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HarnessDescriptor, SessionSnapshot } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot } from '../server/protocol';
 
 const SESSION_KEY = 'underload-harness-app:session';
 const T = 1_700_000_000_000;

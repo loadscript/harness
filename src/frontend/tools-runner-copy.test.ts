@@ -9,7 +9,7 @@
 //
 // Run: npx vitest run --config src/frontend/vitest.config.ts tools-runner-copy.test.ts
 
-import type { HarnessDescriptor, SessionSnapshot, ToolDescriptor } from '@underload/harness/server';
+import type { HarnessDescriptor, SessionSnapshot, ToolDescriptor } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { viewAwareFetch } from './view-test-support';
 import { sessionToolReads } from './session-config-test-support';
