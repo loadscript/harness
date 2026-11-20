@@ -1,0 +1,91 @@
+# Typecheck, test, build the harness UI, and publish it to GitHub Pages.
+#
+# The package publishes TypeScript source; the only deployable artifact is the
+# Vite application build under `src/frontend/dist`. Pages serves that bundle
+# statically — no API — so the client resolves its local/LAN gateway at runtime
+# (`src/frontend/deployment.ts`), exactly like the previous harness deployment.
+#
+# One-time repo setting (required once, not per-deploy):
+#   Settings → Pages → Build and deployment → Source: "GitHub Actions"
+
+name: CI
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pages: write
+    id-token: write
+
+# One deploy at a time; new pushes cancel in-flight deploys.
+concurrency:
+    group: pages
+    cancel-in-progress: true
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v5
+
+            - name: Setup Node
+              uses: actions/setup-node@v5
+              with:
+                  node-version: 24
+
+            # No lockfile is committed, so `npm install` rather than `npm ci`.
+            - name: Install dependencies
+              run: npm install
+
+            - name: Typecheck
+              run: npm run typecheck
+
+            - name: Test
+              run: npm test
+
+            # Pages serves this repo under the /harness/ project path, so the
+            # bundle's asset URLs must be prefixed. `PLAYGROUND_BASE` is what
+            # src/frontend/vite.config.ts reads for `base`; the default `/`
+            # would 404 every asset at https://loadscript.github.io/harness/.
+            #
+            # VITE_HARNESS_API is deliberately NOT set: this host serves the
+            # bundle and no API, so the client resolves the local/LAN gateway
+            # chain at runtime (src/frontend/deployment.ts) — localhost first,
+            # then the standard LAN host. Pinning one absolute root here would
+            # freeze every visitor onto that single machine.
+            - name: Build UI
+              run: npm run build:frontend
+              env:
+                  PLAYGROUND_BASE: harness
+
+            - name: Configure Pages
+              if: github.event_name != 'pull_request'
+              uses: actions/configure-pages@v5
+
+            - name: Upload Pages artifact
+              if: github.event_name != 'pull_request'
+              uses: actions/upload-pages-artifact@v3
+              with:
+                  # The UI app build is the only bundle here: the package
+                  # publishes its `src/*.ts` sources and has no root build
+                  # output, so this is the one artifact with an `index.html`
+                  # for Pages to serve.
+                  path: src/frontend/dist
+
+    deploy:
+        # PRs only verify the build; pushes to main (and manual runs) publish.
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        needs: build
+        environment:
+            name: github-pages
+            url: ${{ steps.deployment.outputs.page_url }}
+        steps:
+            - name: Deploy to GitHub Pages
+              id: deployment
+              uses: actions/deploy-pages@v4

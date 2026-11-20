@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+lib/
+coverage/
+.turbo/
+*.tsbuildinfo
+.eslintcache
+
+# Package-manager logs
+yarn-debug.log*
+yarn-error.log*
+npm-debug.log*
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Agent scratch space (see root AGENTS.md) — never commit
+/Temp/

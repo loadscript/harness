@@ -1,0 +1,27 @@
+{
+    // Self-contained config (no `extends` outside the repo): this package is a
+    // standalone GitHub repo (git@github.com:loadscript/harness). Options mirror
+    // the noobscript workspace root tsconfig.json so behavior is identical when
+    // the package is developed inside the workspace.
+    "compilerOptions": {
+        "module": "ESNext",
+        "target": "ESNext",
+        "moduleResolution": "bundler",
+        // `src/frontend/vite.config.ts` is loaded natively by Vite, which requires
+        // explicit extensions; it imports `./vite-proxy.ts`. The package publishes
+        // TypeScript source, so this config never emits — the only mode is the
+        // `tsc --noEmit` type check, and the option below requires that.
+        "allowImportingTsExtensions": true,
+        "jsx": "react",
+        "skipLibCheck": true,
+        "allowJs": true,
+        "experimentalDecorators": true,
+        "noEmit": true,
+        "esModuleInterop": true,
+        "strict": true,
+        "lib": ["decorators", "dom", "es5", "scripthost", "es2015.collection"],
+        "types": ["node", "vite/client", "vitest/globals"]
+    },
+    "exclude": ["node_modules", "Temp", "**/*.test.ts", "**/dist/*", "**/lib/*"],
+    "include": ["*.ts", "*.tsx", "**/*.ts", "**/*.tsx"]
+}
