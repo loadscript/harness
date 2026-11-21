@@ -1,19 +1,25 @@
-// R6 — per-harness delete in the left sidebar.
+// R6/R3 — per-harness delete in the left sidebar.
 //
 // The contracts pinned here are the ones that make a durable removal safe to expose on
 // a row the reader is aiming at with the mouse:
 //   - the row is a wrapper: the select button and the delete control are SIBLINGS, so
 //     pressing delete can never also select the harness;
-//   - confirmation is two-step (first press arms, second press sends exactly one
-//     DELETE, and a control outside the row cannot leave a stale arm);
-//   - success removes the row, reselects another harness when the deleted one was
-//     selected, and never sends a session delete (saved sessions are preserved);
-//   - a 404 ("already gone") still clears the row, and any other failure keeps the row
-//     and says what happened in the status pill;
+//   - confirmation is two-step (first press arms, second press starts the cascade, and a
+//     control outside the row cannot leave a stale arm);
+//   - the cascade is ORDERED: every page of the harness's server directory is read
+//     BEFORE the first destructive request, every session is deleted one at a time
+//     through the ordinary session DELETE, and the harness DELETE is sent last;
+//   - a failed enumeration sends no deletes; a failed session delete stops the sequence,
+//     keeps the harness row and reports the exact prefix that was removed; a 409 on the
+//     final harness DELETE is surfaced, never reported as success;
+//   - success removes the row and reselects another harness when the deleted one was
+//     selected;
 //   - an empty roster does not crash the shell, and the playground's temporary session
-//     that belonged to the deleted harness is released with it.
+//     that belonged to the deleted harness is part of the same ordered cleanup;
+//   - legacy orphan sessions (a harness removed outside this page) stay reachable through
+//     the archived directory.
 //
-// Run: npx vitest run --config src/frontend/vitest.config.ts harness-delete-main.test.ts
+// Run: yarn vitest run --config src/frontend/vitest.config.ts harness-delete-main.test.ts
 
 import type { HarnessDescriptor, SessionSnapshot, ToolDescriptor } from '../server/protocol';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -104,9 +110,26 @@ const stubServer = (options: {
     records?: Record<string, SessionSnapshot>;
     notFoundFor?: string;
     failFor?: string;
+    conflictFor?: string;
+    // R3: explicit paged answers for the harness-filtered directory read. The map is
+    // harness -> pages of session ids; the stub issues `p1`, `p2`, … as `next_cursor`
+    // so the test proves the CLIENT followed the server's cursors (and not the cache).
+    directory?: Record<string, string[][]>;
+    // Simulates a server/gateway that ignores `?harness=` entirely: the page still
+    // answers, but every row belongs to whatever the fixture holds.
+    ignoreHarnessFilter?: boolean;
+    failDirectoryFor?: string;
+    failSessionDeleteFor?: string;
+    missingSessionFor?: string;
+    holdSessionDeleteFor?: string;
+    holdSessionDelete?: () => Promise<unknown>;
     holdDelete?: () => Promise<unknown>;
 }): Call[] => {
     const calls: Call[] = [];
+    // The fake server's MUTABLE directory. `options.sessions` is the boot document; this
+    // list is what a later list/delete/create sees, so the enumeration can prove live
+    // server ownership rather than a fixture that keeps repeating deleted ids.
+    const live = [...(options.sessions ?? [])];
 
     // T45: the log is taken on the OUTSIDE of `viewAwareFetch`, i.e. it records the URL the
     // BROWSER asked for (`/v1/harness/...`, ../shared/harness-api.ts:69). On the inside, the
@@ -180,21 +203,98 @@ const stubServer = (options: {
             return json({ ok: true, result: { enabled: [], tools: [], truncated: false, remaining: 0 }, durationMs: 4 });
         }
         if (url === '/api/sessions' && method === 'POST') {
-            return json({ session: snapshot('temp-1', options.presets[0].name) }, 201);
+            const created = snapshot('temp-1', options.presets[0].name);
+
+            // A created session is a server record, so the filtered enumeration must see
+            // it. Without this the playground cleanup would look like a special case the
+            // cascade missed rather than the same ordered DELETE.
+            live.push(created);
+            return json({ session: created }, 201);
+        }
+
+        // R3: the harness cascade asks the SERVER for one harness's pages. The answer is
+        // the canonical page shape (`items` + `next_cursor`), so `viewAwareFetch` passes it
+        // through unchanged. `directory` names explicit pages for the paging tests; without
+        // it the fixture's live sessions for that harness are one page, which is all the
+        // single-page tests need.
+        //
+        // ONLY a harness-filtered read is declared here. Unfiltered directory reads stay
+        // undeclared so the adapter composes them from the boot document exactly as it did
+        // before this stub grew a route (declaring the bare `/sessions` read was enough to
+        // make the boot directory empty).
+        if (method === undefined && url.startsWith('/api/sessions?')) {
+            const query = new URLSearchParams(url.slice(url.indexOf('?') + 1));
+            const harness = query.get('harness');
+
+            if (harness !== null) {
+                if (harness === options.failDirectoryFor) {
+                    return json({ error: { message: 'The session index is unavailable.' } }, 500);
+                }
+
+                if (options.ignoreHarnessFilter === true) {
+                    return json({
+                        items: live.map((session) => ({ id: session.id, harness: session.harness })),
+                        limit: 100,
+                        next_cursor: null,
+                        observed_at: 1,
+                        revision: 1
+                    });
+                }
+
+                const pages =
+                    options.directory?.[harness] ??
+                    [live.filter((session) => session.harness === harness).map((session) => session.id)];
+                const cursor = query.get('cursor');
+                const index = cursor === null ? 0 : Number.parseInt(cursor.replace(/^p/, ''), 10);
+                const ids = pages[index] ?? [];
+                const next = index + 1 < pages.length ? `p${index + 1}` : null;
+
+                return json({
+                    // The row names its OWN harness, exactly like `SessionSummary`: the
+                    // cleanup verifies it as a second line of defence against a server
+                    // that ignores the filter.
+                    items: ids.map((id) => ({ id, harness })),
+                    limit: 100,
+                    next_cursor: next,
+                    observed_at: 1,
+                    revision: 1
+                });
+            }
         }
 
         // A saved conversation is authoritative on its own: it carries the definition
         // it froze at creation, whether or not its harness still exists.
         if (url.startsWith('/api/sessions/') && method === undefined) {
             const id = decodeURIComponent(url.split('/').pop() as string);
-            const record = options.records?.[id] ?? (options.sessions ?? []).find((s) => s.id === id);
+            const record =
+                options.records?.[id] ?? live.find((s) => s.id === id) ?? (options.sessions ?? []).find((s) => s.id === id);
 
             if (record === undefined) return json({ error: { message: `Unknown session ${id}` } }, 404);
 
             return json({ session: record });
         }
 
-        if (url.startsWith('/api/sessions/') && method === 'DELETE') return json({ deleted: true });
+        if (url.startsWith('/api/sessions/') && method === 'DELETE') {
+            const id = decodeURIComponent(url.split('/').pop() as string);
+
+            // R3 sequentiality: the next DELETE must not leave the browser while this one
+            // is unanswered. Only the named id is held, so the release proves the ORDER.
+            if (id === options.holdSessionDeleteFor && options.holdSessionDelete !== undefined) {
+                await options.holdSessionDelete();
+            }
+
+            if (id === options.failSessionDeleteFor) {
+                return json({ error: { message: 'The session is locked.' } }, 500);
+            }
+            if (id === options.missingSessionFor) {
+                return json({ error: { message: `Unknown session ${id}.` } }, 404);
+            }
+
+            const index = live.findIndex((session) => session.id === id);
+            if (index >= 0) live.splice(index, 1);
+
+            return json({ deleted: true });
+        }
 
         // R6: the harness delete route, with the shapes the backend worker agreed to.
         if (url.startsWith('/api/harnesses/') && method === 'DELETE') {
@@ -209,6 +309,18 @@ const stubServer = (options: {
             }
             if (name === options.failFor) {
                 return json({ error: { message: 'The registry could not be written' } }, 500);
+            }
+            if (name === options.conflictFor) {
+                // The server's ownership guard: a session appeared after the cleanup (the
+                // concurrent-create race), so the harness must stay.
+                return json(
+                    {
+                        error: {
+                            message: `Harness "${name}" still owns 1 session. Delete it first; a harness can only be deleted after all of its sessions are deleted.`
+                        }
+                    },
+                    409
+                );
             }
 
             return json({ deleted: true });
@@ -330,7 +442,9 @@ it('offers an accessible delete control beside each row without selecting the ha
     expect(deleteFor('beta').type).toBe('button');
     expect(deleteFor('beta').disabled).toBe(false);
     expect(deleteFor('beta').getAttribute('aria-label')).toBe('Delete harness beta');
-    expect(deleteFor('beta').title).toBe('Delete Beta (beta) permanently. Its saved sessions stay.');
+    expect(deleteFor('beta').title).toBe(
+        'Delete Beta (beta) permanently. Every session it owns is deleted too.'
+    );
 
     // Pressing delete must not move the selection: the first press only arms.
     expect(pressedHarnesses()).toEqual(['alpha']);
@@ -348,8 +462,11 @@ it('offers an accessible delete control beside each row without selecting the ha
     expect(armed.dataset.armed).toBe('true');
     expect(deleteFor('beta').textContent).toBe('Delete?');
     expect(deleteFor('beta').getAttribute('aria-label')).toBe('Confirm delete harness beta');
+    expect(deleteFor('beta').title).toBe(
+        'Delete Beta (beta) permanently, including every session it owns. Press again to confirm, or pick another row to cancel.'
+    );
     expect(armed.querySelector('.harness-delete-hint')?.textContent).toBe(
-        'Delete “Beta” (beta) permanently? Its saved sessions stay, and this cannot be undone from the UI.'
+        'Delete “Beta” (beta) permanently? Every session and conversation it owns will be deleted first, and this cannot be undone from the UI.'
     );
     expect(deleteFor('beta').getAttribute('aria-describedby')).toBe('harness-delete-hint-beta');
     expect(armed.contains(deleteFor('beta'))).toBe(true);
@@ -376,7 +493,19 @@ it('deletes the selected harness after the second press and reselects another on
     // alpha is selected by boot; delete it and the shell must land somewhere sensible.
     await deleteHarnessRow('alpha');
 
-    expect(deletes(calls, '/v1/harness/harnesses/alpha')).toHaveLength(1);
+    // R3: the server directory is read FIRST (filtered to the exact harness), then the
+    // harness's one session is deleted, and the harness DELETE is last.
+    const listedAt = calls.findIndex(
+        (call) => call.method === undefined && call.url === '/v1/harness/sessions?limit=100&harness=alpha'
+    );
+    const firstDeleteAt = calls.findIndex((call) => call.method === 'DELETE');
+
+    expect(listedAt).toBeGreaterThanOrEqual(0);
+    expect(listedAt).toBeLessThan(firstDeleteAt);
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' },
+        { url: '/v1/harness/harnesses/alpha', method: 'DELETE' }
+    ]);
     expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(0);
 
     // Reselect sensibly: the remaining production harness is now the selected one.
@@ -391,23 +520,17 @@ it('deletes the selected harness after the second press and reselects another on
     expect(document.querySelector('.harness-note')?.hidden).toBe(true);
     expect(selectFor('beta').disabled).toBe(false);
 
-    // R6: a harness delete never removes conversations. Only the harness route was hit.
-    expect(calls.filter((call) => call.method === 'DELETE' && call.url.startsWith('/v1/harness/sessions/'))).toEqual([]);
-
-    // The surviving harness still lists its own session, and the deleted harness's
-    // conversation stays reachable in the SAME directory (T3/R1 + T9: the dashboard behind
-    // the title) — as a `data-archived` pill instead of a rail group with its own heading.
+    // The deleted harness's conversation is gone from the directory too: the cascade
+    // removed the record, so there is no archived pill to reach in this flow.
     const bar = dashboard();
     expect(
         [...bar.querySelectorAll<HTMLElement>('.session-pill[data-archived=false]')].map(
             (node) => node.dataset.sessionId
         )
     ).toEqual(['chat-b']);
-    expect(
-        [...bar.querySelectorAll<HTMLElement>('.session-pill[data-archived=true]')].map(
-            (node) => node.dataset.sessionId
-        )
-    ).toEqual(['chat-a']);
+    expect([...bar.querySelectorAll<HTMLElement>('.session-pill')].map((node) => node.dataset.sessionId)).toEqual([
+        'chat-b'
+    ]);
     closeDashboard();
 
     expect(statusState()).toBe('idle');
@@ -503,39 +626,84 @@ it('survives an empty roster and releases the playground session bound to the de
 
     await deleteHarnessRow('alpha');
 
-    // The roster is empty: the rail says so instead of crashing. The tools view keeps the
-    // centre column (the playground is still useful), so no dead transcript is left
-    // showing a harness that no longer exists.
+    // The roster is empty: the rail says so instead of crashing. Deleting the CURRENT
+    // conversation has always closed the tools view (`syncConfigScope` -> the view is
+    // session-bound), so with every session now gone the centre column is the empty-stage
+    // guidance rather than a pane describing a context that no longer exists.
     expect(document.querySelectorAll('.harness-row')).toHaveLength(0);
     expect(document.querySelector('.harness-list .field-hint')?.textContent).toBe(
         'No harnesses reported by the server yet.'
     );
     expect(pressedHarnesses()).toEqual([]);
-    expect(document.querySelector('.stage .tools-pane')).not.toBeNull();
-    expect(document.querySelector('.main-title')?.textContent).toBe('Tools Catalogue');
-
-    // R7: the temporary session belonged to that harness, so it goes with it.
-    expect(deletes(calls, '/v1/harness/sessions/temp-1')).toHaveLength(1);
-
-    // R3: the playground note that used to say this is gone — the pane never claims a
-    // context it does not have, and a session-bound call answers with an actionable error
-    // instead (asserted below) rather than the heading area guessing about it.
+    expect(document.querySelector('.stage .tools-pane')).toBeNull();
+    expect(document.querySelector('.empty .field-hint')?.textContent).toBe(
+        'No harness is available. Create one with “+ New” in the harnesses panel.'
+    );
     expect(document.querySelector('.tools-session-note')).toBeNull();
 
-    const toolCallsBefore = byPrefix(calls, '/v1/harness/tools/').length;
+    // R7/R3: the temporary session belonged to that harness, so the SAME ordered cleanup
+    // removed it — one DELETE, and no second fire-and-forget request from the playground's
+    // own release path. The cascade CLAIMED the id before deleting the current conversation,
+    // which is what the tools view's own close path consults.
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' },
+        { url: '/v1/harness/sessions/temp-1', method: 'DELETE' },
+        { url: '/v1/harness/harnesses/alpha', method: 'DELETE' }
+    ]);
+    expect(deletes(calls, '/v1/harness/sessions/temp-1')).toHaveLength(1);
+
+    // No `playground cleanup` rejection repainted over the harness outcome.
+    expect(statusState()).toBe('idle');
+    expect(statusDetail()).toBe('deleted alpha');
+});
+
+it('clears a deleted playground session immediately so a later failure cannot reuse it', async () => {
+    const calls = stubServer({
+        presets: [descriptor('alpha')],
+        tools: [coreTool],
+        sessions: [snapshot('chat-a', 'alpha')],
+        // The playground's temp-1 is created at runtime; the explicit page names it first
+        // so the cascade deletes it BEFORE the session that then fails.
+        directory: { alpha: [['temp-1', 'chat-a']] },
+        failSessionDeleteFor: 'chat-a'
+    });
+    await boot();
+
+    // Build the playground context: one session-bound call creates temp-1 on alpha.
+    document.querySelector<HTMLButtonElement>('.tools-toggle')?.click();
+    await flush();
+    document.querySelector<HTMLButtonElement>('.tool-tab-info[data-tool="toolRequest"]')?.click();
+    await flush();
+    document.querySelector<HTMLTextAreaElement>('.tool-args')!.value = '{"tags":["web"]}';
     document.querySelector<HTMLButtonElement>('.tool-card button.primary')?.click();
     await flush();
     await flush();
 
-    expect(byPrefix(calls, '/v1/harness/tools/')).toHaveLength(toolCallsBefore);
-    expect(JSON.parse(document.querySelector('.tool-output .card-body')?.textContent ?? '{}')).toEqual({
-        ok: false,
-        error: {
-            kind: 'no_harness',
-            message:
-                'This server reports no harness, so this core tool has no session to run in. Create a harness in the sidebar, then call again.'
-        }
-    });
+    expect(posts(calls, '/v1/harness/sessions', 'POST')).toHaveLength(1);
+
+    // temp-1 is deleted, then chat-a's DELETE fails. The tools view stays open because
+    // the bound conversation (chat-a) survived.
+    await deleteHarnessRow('alpha');
+
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/temp-1', method: 'DELETE' },
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' }
+    ]);
+    expect(document.querySelector('.stage .tools-pane')).not.toBeNull();
+    expect(statusState()).toBe('error');
+    expect(statusDetail()).toBe(
+        'session cleanup failed after 1 of 2 sessions were deleted or already absent (The session is locked.). Harness alpha was not deleted.'
+    );
+
+    // The next playground call must create a NEW context (a second POST), never reuse the
+    // tombstoned temp-1 and never fire a second cleanup DELETE for it.
+    document.querySelector<HTMLButtonElement>('.tool-card button.primary')?.click();
+    await flush();
+    await flush();
+
+    expect(posts(calls, '/v1/harness/sessions', 'POST')).toHaveLength(2);
+    expect(deletes(calls, '/v1/harness/sessions/temp-1')).toHaveLength(1);
+    expect(statusDetail()).not.toContain('playground cleanup');
 });
 
 it('replaces the chat column with guidance when the last harness is deleted outside the tools view', async () => {
@@ -554,15 +722,15 @@ it('replaces the chat column with guidance when the last harness is deleted outs
     );
     expect(document.querySelectorAll('.harness-row')).toHaveLength(0);
     expect(pressedHarnesses()).toEqual([]);
-    // T3/R1 + T9: the dashboard carries no "select a harness" hint here, because the deleted
-    // harness's conversation is still listed (R6: losing the definition must not orphan the
-    // record). The rail's `.sessions-scope` sentence is gone with the rail.
+    // T3/R1 + T9: the dashboard is empty — the cascade deleted the harness's only session
+    // before the harness itself, so there is no orphan pill left behind. With no harness
+    // left to scope the list, the empty sentence is the "select a harness" hint (the old
+    // archived pill was what made this case read "no sessions yet"). The rail's
+    // `.sessions-scope` sentence is gone with the rail.
     expect(document.querySelector('.sessions-scope')).toBeNull();
     const bar = dashboard();
-    expect(bar.querySelector('.session-pills-empty')).toBeNull();
-    expect([...bar.querySelectorAll<HTMLElement>('.session-pill')].map((node) => node.dataset.sessionId)).toEqual([
-        'chat-a'
-    ]);
+    expect(bar.querySelector('.session-pills-empty')?.textContent).toBe('Select a harness to see its sessions.');
+    expect([...bar.querySelectorAll<HTMLElement>('.session-pill')].map((node) => node.dataset.sessionId)).toEqual([]);
     closeDashboard();
     expect((document.querySelector('.composer') as HTMLFormElement | null)?.hidden).toBe(true);
     expect((document.querySelector('.agent-slot') as HTMLElement | null)?.hidden).toBe(true);
@@ -611,14 +779,276 @@ it('locks every delete control while one delete is in flight', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// R6: a deleted harness keeps its saved conversations reachable.
+// R3: the browser automates "delete every session, then the harness".
 // ---------------------------------------------------------------------------
 //
-// The harness delete removes the DEFINITION only. The rail is scoped to the selected
-// harness and a deleted harness has no row to select, so without an explicit archived
-// group those records would become unreachable until the exact name was recreated. These
-// tests pin the archived group, the reopen from the record's FROZEN definition, and the
-// rule that nothing is ever written back to the registry.
+// The server refuses DELETE /harnesses/:name while it still owns a session (409) and has
+// no bulk session route. These tests pin the browser half: every page of the SERVER's
+// harness-filtered directory is read before the first delete, the deletes are sequential,
+// the harness DELETE is last, and every failure stops the workflow at a truthful point.
+
+it('enumerates every page of the exact harness before deleting, and deduplicates repeated ids', async () => {
+    const calls = stubServer({
+        presets: [descriptor('alpha'), descriptor('beta')],
+        // The browser's cache holds only these two rows: the cascade must still find the
+        // ids that exist only on the server's later pages.
+        sessions: [snapshot('chat-a', 'alpha'), snapshot('chat-b', 'beta')],
+        // The same id on both pages proves the defensive dedupe: one DELETE, not two.
+        directory: { alpha: [['chat-a', 'chat-c'], ['chat-c', 'chat-d']] },
+        // A page can name an id another browser already deleted; that is the desired end
+        // state and must not stop the sequence.
+        missingSessionFor: 'chat-c'
+    });
+    await boot();
+
+    await deleteHarnessRow('alpha');
+
+    // BOTH pages were read, and the filter names the exact canonical harness on each. The
+    // unfiltered boot directory read is deliberately excluded: the claim is about the
+    // cascade's own enumeration.
+    expect(
+        calls
+            .filter(
+                (call) => call.method === undefined && call.url.includes('harness=alpha')
+            )
+            .map((call) => call.url)
+    ).toEqual([
+        '/v1/harness/sessions?limit=100&harness=alpha',
+        '/v1/harness/sessions?limit=100&cursor=p1&harness=alpha'
+    ]);
+
+    // BOTH pages were read before the FIRST destructive request: the cascade enumerates
+    // the whole ownership set first, then deletes.
+    const lastPageAt = calls.findIndex(
+        (call) => call.url === '/v1/harness/sessions?limit=100&cursor=p1&harness=alpha'
+    );
+    const firstDeleteAt = calls.findIndex((call) => call.method === 'DELETE');
+    expect(lastPageAt).toBeGreaterThanOrEqual(0);
+    expect(lastPageAt).toBeLessThan(firstDeleteAt);
+
+    // Sequential order: page 1, page 2, then the harness. The duplicate chat-c was
+    // deleted once; the 404 counted as already gone rather than a failure; chat-b (another
+    // harness) was never touched.
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' },
+        { url: '/v1/harness/sessions/chat-c', method: 'DELETE' },
+        { url: '/v1/harness/sessions/chat-d', method: 'DELETE' },
+        { url: '/v1/harness/harnesses/alpha', method: 'DELETE' }
+    ]);
+    expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(0);
+    expect(pressedHarnesses()).toEqual(['beta']);
+    expect(document.querySelector('.main-title')?.textContent).toBe('Beta');
+    expect(document.querySelector<HTMLElement>('.session-cycle')?.dataset.sessionId).toBe('chat-b');
+    expect(statusState()).toBe('idle');
+    expect(statusDetail()).toBe('deleted alpha');
+});
+
+it('waits for each session DELETE before sending the next, and sends the harness DELETE last', async () => {
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+
+    const calls = stubServer({
+        presets: [descriptor('alpha')],
+        sessions: [snapshot('chat-a', 'alpha'), snapshot('chat-b', 'alpha')],
+        holdSessionDeleteFor: 'chat-a',
+        holdSessionDelete: () => held
+    });
+    await boot();
+
+    deleteFor('alpha').click();
+    await flush();
+    deleteFor('alpha').click();
+    await flush();
+
+    // The first session DELETE is unanswered: no later session DELETE and no harness
+    // DELETE may have left the browser (this is the sequential contract, not only an
+    // ordering of the recorded log after the fact).
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' }
+    ]);
+    expect(deletes(calls, '/v1/harness/sessions/chat-b')).toEqual([]);
+    expect(deletes(calls, '/v1/harness/harnesses/alpha')).toEqual([]);
+
+    // The whole cascade keeps the roster locked while its first request is in flight.
+    expect(deleteFor('alpha').disabled).toBe(true);
+    expect(rowFor('alpha').dataset.armed).toBeUndefined();
+
+    // R3 lock: a rail press on ANOTHER session during the cascade must not race it with a
+    // second DELETE. The guard (not merely the control's disabled attribute) is what
+    // refuses the press: chat-b is not in `removingSessions` yet.
+    dashboard()
+        .querySelector<HTMLButtonElement>('.session-pill[data-session-id="chat-b"] .session-pill-delete')
+        ?.click();
+    await flush();
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' }
+    ]);
+    closeDashboard();
+
+    release?.();
+    await flush();
+    await flush();
+    await flush();
+
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' },
+        { url: '/v1/harness/sessions/chat-b', method: 'DELETE' },
+        { url: '/v1/harness/harnesses/alpha', method: 'DELETE' }
+    ]);
+    expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(0);
+    expect(statusState()).toBe('idle');
+    expect(statusDetail()).toBe('deleted alpha');
+});
+
+it('stops at the first failed session, keeps the harness and reports the removed prefix', async () => {
+    const calls = stubServer({
+        presets: [descriptor('alpha'), descriptor('beta')],
+        sessions: [
+            snapshot('chat-a', 'alpha'),
+            snapshot('chat-b', 'alpha'),
+            snapshot('chat-c', 'alpha')
+        ],
+        directory: { alpha: [['chat-a', 'chat-b'], ['chat-c']] },
+        failSessionDeleteFor: 'chat-b'
+    });
+    await boot();
+
+    await deleteHarnessRow('alpha');
+
+    // chat-a was removed, chat-b failed, and the sequence STOPPED before chat-c and the
+    // harness. No rollback and no claim of completion.
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' },
+        { url: '/v1/harness/sessions/chat-b', method: 'DELETE' }
+    ]);
+    expect(deletes(calls, '/v1/harness/harnesses/alpha')).toEqual([]);
+
+    // The harness row STAYS and is usable again (no stale arm, no permanent lock).
+    expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(1);
+    expect(rowFor('alpha').dataset.armed).toBeUndefined();
+    expect(deleteFor('alpha').disabled).toBe(false);
+    expect(pressedHarnesses()).toEqual(['alpha']);
+    expect(document.querySelector('.main-title')?.textContent).toBe('Alpha');
+
+    // The cache mirrors exactly what settled: chat-a is gone, chat-b (failed) and chat-c
+    // (never attempted) remain listed.
+    const bar = dashboard();
+    expect(
+        [...bar.querySelectorAll<HTMLElement>('.session-pill')]
+            .map((node) => node.dataset.sessionId)
+            .sort()
+    ).toEqual(['chat-b', 'chat-c']);
+    closeDashboard();
+
+    expect(statusState()).toBe('error');
+    expect(statusDetail()).toBe(
+        'session cleanup failed after 1 of 3 sessions were deleted or already absent (The session is locked.). Harness alpha was not deleted.'
+    );
+});
+
+it('sends no delete at all when the session enumeration fails', async () => {
+    const calls = stubServer({
+        presets: [descriptor('alpha')],
+        sessions: [snapshot('chat-a', 'alpha')],
+        failDirectoryFor: 'alpha'
+    });
+    await boot();
+
+    await deleteHarnessRow('alpha');
+
+    // Non-destructive: no session DELETE and no harness DELETE left the browser.
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([]);
+    expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(1);
+    expect(rowFor('alpha').dataset.armed).toBeUndefined();
+    expect(deleteFor('alpha').disabled).toBe(false);
+    expect(pressedHarnesses()).toEqual(['alpha']);
+
+    // The session is still on the server and still in the directory.
+    const bar = dashboard();
+    expect([...bar.querySelectorAll<HTMLElement>('.session-pill')].map((node) => node.dataset.sessionId)).toEqual([
+        'chat-a'
+    ]);
+    closeDashboard();
+
+    expect(statusState()).toBe('error');
+    expect(statusDetail()).toBe(
+        'could not list sessions of alpha (The session index is unavailable.). No session or harness was deleted.'
+    );
+});
+
+it('sends no delete when the directory names another harness’s session', async () => {
+    const calls = stubServer({
+        presets: [descriptor('alpha')],
+        // A server/gateway that ignores `?harness=`: the alpha cleanup is answered with
+        // beta's row. The client must refuse to delete anything rather than trust it.
+        sessions: [snapshot('chat-b', 'beta')],
+        ignoreHarnessFilter: true
+    });
+    await boot();
+
+    await deleteHarnessRow('alpha');
+
+    // Enumeration COMPLETED (one filtered page), but no session and no harness DELETE.
+    expect(
+        calls.filter((call) => call.method === undefined && call.url.includes('harness=alpha')).map((call) => call.url)
+    ).toEqual(['/v1/harness/sessions?limit=100&harness=alpha']);
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([]);
+
+    // The harness row stays usable (no stale arm, no permanent lock), and the error names
+    // exactly why the ownership set could not be trusted.
+    expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(1);
+    expect(rowFor('alpha').dataset.armed).toBeUndefined();
+    expect(deleteFor('alpha').disabled).toBe(false);
+    expect(statusState()).toBe('error');
+    expect(statusDetail()).toBe(
+        'could not verify sessions of alpha (the server returned session chat-b for beta). No session or harness was deleted.'
+    );
+});
+
+it('surfaces a 409 on the final harness delete after a completed session cleanup', async () => {
+    const calls = stubServer({
+        presets: [descriptor('alpha')],
+        sessions: [snapshot('chat-a', 'alpha')],
+        // The cleanup succeeded, but a concurrent session appeared before the harness
+        // DELETE: the server's ownership guard is the authority and must be surfaced.
+        conflictFor: 'alpha'
+    });
+    await boot();
+
+    await deleteHarnessRow('alpha');
+
+    // The session really was deleted first; only the harness write failed.
+    expect(calls.filter((call) => call.method === 'DELETE')).toEqual([
+        { url: '/v1/harness/sessions/chat-a', method: 'DELETE' },
+        { url: '/v1/harness/harnesses/alpha', method: 'DELETE' }
+    ]);
+    expect(document.querySelectorAll('.harness-row[data-harness="alpha"]')).toHaveLength(1);
+    expect(deleteFor('alpha').disabled).toBe(false);
+    expect(rowFor('alpha').dataset.armed).toBeUndefined();
+
+    // No success claim: the session cleanup is visible (the pill is gone), but the
+    // app-scoped pill reports the server's 409 sentence.
+    const bar = dashboard();
+    expect([...bar.querySelectorAll<HTMLElement>('.session-pill')]).toEqual([]);
+    closeDashboard();
+    expect(statusState()).toBe('error');
+    expect(statusDetail()).toBe(
+        'delete harness: Harness "alpha" still owns 1 session. Delete it first; a harness can only be deleted after all of its sessions are deleted.'
+    );
+});
+
+// ---------------------------------------------------------------------------
+// R6: LEGACY orphan sessions stay reachable through the archived directory.
+// ---------------------------------------------------------------------------
+//
+// The current harness delete removes every session it can list BEFORE the definition, so
+// it no longer produces orphans. A record from an EARLIER deletion (or a harness removed
+// outside this page) still has no rail row to select, and without an explicit archived
+// group it would become unreachable until the exact name was recreated. These tests pin
+// the archived projection, the reopen from the record's FROZEN definition, and the rule
+// that nothing is ever written back to the registry.
 const frozenAlpha = (): HarnessDescriptor => ({
     ...descriptor('alpha'),
     // Distinct on purpose: the reopened chat must render THIS definition (the one the
@@ -633,28 +1063,19 @@ const archivedRecord = (): SessionSnapshot =>
         turns: [turn('Plan the release')]
     });
 
-it('keeps a deleted harness session reachable as an archived pill and reopens it from its frozen definition', async () => {
+it('keeps a legacy orphan session reachable as an archived pill and reopens it from its frozen definition', async () => {
     const calls = stubServer({
-        presets: [descriptor('alpha'), descriptor('beta')],
+        // alpha has NO registry row: this record is what an earlier deletion (or a
+        // delete from another client) left behind. Boot lands on beta.
+        presets: [descriptor('beta')],
         sessions: [archivedRecord()]
     });
     await boot();
 
-    // Before the delete the conversation is an ordinary pill of the selected harness
-    // (T9: read it in the dashboard behind the title, then put the layer away).
-    const before = dashboard();
-    expect(before.querySelector('.session-archived')).toBeNull();
-    expect(
-        before.querySelectorAll('.session-pill[data-archived=false][data-session-id="chat-a"]')
-    ).toHaveLength(1);
-    closeDashboard();
-
-    await deleteHarnessRow('alpha');
-
-    // beta is now selected, and alpha's conversation is still reachable (R6): it stays in
-    // the same directory, flagged `data-archived`. T3/R1 dropped the labelled rail group and
-    // its explanatory hint — the dashed/muted pill frame and the harness in the tooltip
-    // carry the same fact one line lower.
+    // T9: read the archive in the dashboard behind the title. The record is flagged
+    // `data-archived` from the start; T3/R1 dropped the labelled rail group and its
+    // explanatory hint — the dashed/muted pill frame and the harness in the tooltip carry
+    // the same fact one line lower.
     const pill = dashboard().querySelector<HTMLElement>('.session-pill[data-session-id="chat-a"]');
     expect(pill?.dataset.archived).toBe('true');
     expect(pill?.dataset.status).toBe('idle');
@@ -664,11 +1085,10 @@ it('keeps a deleted harness session reachable as an archived pill and reopens it
     expect(select?.textContent).toBe('chat-a');
     expect(select?.title).toBe('alpha · idle · chat-a');
 
-    // Opening it is the normal path: one identified record read, nothing else. The count
-    // is taken from here because T21 R21 already opened this conversation on the first
-    // load (alpha was the harness on screen) — the point of the assertion is that the
-    // REOPEN after the delete costs exactly one read. (`readRecord` is the exact
-    // `/v1/harness/sessions/:id` path only, so the open's `/turns`, `/threads`,
+    // Opening it is the normal path: one identified record read, nothing else. Boot never
+    // opened this record (beta is the selected harness and alpha's only conversation is
+    // archived), so the count taken here is the archived open's OWN cost. (`readRecord` is
+    // the exact `/v1/harness/sessions/:id` path only, so the open's `/turns`, `/threads`,
     // `/actions` and `/turns/:tid/display` subresources cannot inflate it.)
     const readsBefore = readRecord(calls, 'chat-a').length;
     pill?.querySelector<HTMLButtonElement>('.session-pill-select')?.click();
@@ -718,21 +1138,18 @@ it('keeps a deleted harness session reachable as an archived pill and reopens it
     expect(calls.filter((call) => call.url === '/v1/harness/sessions/chat-a' && call.method === 'DELETE')).toEqual([]);
 });
 
-it('reopens an archived conversation even when no harness is left at all', async () => {
-    const calls = stubServer({ presets: [descriptor('alpha')], sessions: [archivedRecord()] });
+it('reopens a legacy orphan conversation even when no harness is left at all', async () => {
+    const calls = stubServer({ presets: [], sessions: [archivedRecord()] });
     await boot();
 
-    await deleteHarnessRow('alpha');
-
     // Empty roster: there is no harness row to select, but the conversation is still
-    // offered — losing the definition must not orphan the record.
+    // offered — a definition removed by an earlier deletion must not orphan the record.
     expect(document.querySelectorAll('.harness-row')).toHaveLength(0);
     const bar = dashboard();
-    // T4: this is the Sessions-only layer. Its accessible name says exactly that (the head
-    // still names the harness that was just deleted, so reusing that title would claim a
-    // definition the roster no longer has), and NOTHING below the dashboard is stale: the
-    // description, the `harnessMeta` line, the repeated note and the aggregate totals all
-    // describe a harness that is gone.
+    // T4: this is the Sessions-only layer. Its accessible name says exactly that (there is
+    // no harness head to reuse), and NOTHING below the dashboard is stale: the description,
+    // the `harnessMeta` line, the repeated note and the aggregate totals all describe a
+    // harness the registry does not have.
     const panel = document.querySelector('.dialog');
     expect(panel?.querySelector('.dialog-title')?.textContent).toBe('Sessions');
     expect(panel?.querySelector('.harness-details-description')).toBeNull();
@@ -773,15 +1190,13 @@ it('reopens an archived conversation even when no harness is left at all', async
 it('refuses an archived record with no frozen definition instead of inventing a harness', async () => {
     const legacy = snapshot('chat-l', 'alpha', { turns: [] });
     stubServer({
-        presets: [descriptor('alpha'), descriptor('beta')],
+        presets: [descriptor('beta')],
         sessions: [legacy],
         records: { 'chat-l': legacy }
     });
     await boot();
 
-    await deleteHarnessRow('alpha');
-
-    // T9: the archived conversation is offered in the dashboard behind the title.
+    // T9: the legacy orphan is offered in the dashboard behind the title.
     dashboard()
         .querySelector<HTMLElement>('.session-pill[data-session-id="chat-l"]')
         ?.querySelector<HTMLButtonElement>('.session-pill-select')
@@ -799,6 +1214,3 @@ it('refuses an archived record with no frozen definition instead of inventing a 
 
 const posts = (calls: Call[], url: string, method: string): Call[] =>
     calls.filter((call) => call.url === url && call.method === method);
-
-const byPrefix = (calls: Call[], prefix: string): Call[] =>
-    calls.filter((call) => call.url.startsWith(prefix));

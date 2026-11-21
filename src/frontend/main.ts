@@ -122,7 +122,7 @@ import type { DisplayStep, TurnDisplayOp, TurnSummary, TurnStepDetail, TurnBlock
 // `loadAgentPresetTexts`): the ONLY response that states an agent's preset
 // instruction text, because `GET /agents` rows are text-free summaries
 // (../shared/harness-api.ts:552-563).
-import type { AgentProfile, HarnessInstructionSummaryEntry, HarnessPendingTool, PluginSetting, PluginSummary, SessionToolSummary, TaskReceipt, ToolDetail } from '../shared/harness-api';
+import type { AgentProfile, HarnessInstructionSummaryEntry, HarnessPendingTool, PluginSetting, PluginSummary, SessionSummary, SessionToolSummary, TaskReceipt, ToolDetail } from '../shared/harness-api';
 // The display wire (T5) is the shell's DEFAULT surface: every fetch, every stream
 // and every submit below speaks `/views`, so no round trip on this path can carry a
 // recorded event. The raw client (./api.ts) stays imported for the catalogue routes
@@ -182,6 +182,10 @@ import {
     readDefinition,
     // T46: the archived reopen's descriptor (./view-api.ts `frozenDescriptorOf`).
     frozenDescriptorOf,
+    // R3 cascade: the harness delete enumerates EVERY session of the harness from the
+    // paged server directory. The local cache is only the first page and cannot answer
+    // "does this harness still own a session?".
+    listAllSessions,
     readTurnDisplay,
     readTurnDisplayWithPending,
     // T52: the bounded ROW re-read a submit receipt cannot replace (./view-api.ts
@@ -4170,8 +4174,9 @@ const harnessDetailsBody = (display: HarnessDescriptor | undefined): HTMLElement
 // (`harnessMeta`); nothing else is invented (R2: existing metadata only).
 const openHarnessDetails = (trigger: HTMLElement): void => {
     // T9: `current` is undefined when the roster is empty (the last harness was deleted),
-    // and the saved conversations of a deleted harness are still reachable — from THIS
-    // layer. The tools view takes the same Sessions-only shape: its head names a tool, not
+    // and a LEGACY orphan conversation of a deleted harness is still reachable — from THIS
+    // layer (the current delete flow removes a harness's sessions first). The tools view
+    // takes the same Sessions-only shape: its head names a tool, not
     // a harness, so the harness copy below the dashboard would describe something the
     // reader is not looking at.
     const instance = current;
@@ -6398,7 +6403,12 @@ const playgroundHarness = (): string | undefined => presetDescriptors[0]?.name;
 // Close the temporary context: invalidate the current generation FIRST (so an in-flight
 // create discards its own answer), then delete the record. `pagehide` uses the keepalive
 // variant because an ordinary fetch may not survive the unload.
-const releasePlaygroundSession = (options?: { unload?: boolean }): void => {
+//
+// `settled` means the caller ALREADY deleted the record (the harness cascade deletes every
+// session the server lists, in order, before the harness DELETE). Only the local context is
+// released then: a second fire-and-forget DELETE would answer 404 for a tombstoned id and
+// could repaint `playground cleanup` over the real harness outcome.
+const releasePlaygroundSession = (options?: { unload?: boolean; settled?: boolean }): void => {
     const id = playground.sessionId;
 
     playground.sessionId = undefined;
@@ -6410,6 +6420,18 @@ const releasePlaygroundSession = (options?: { unload?: boolean }): void => {
     playground.generation += 1;
 
     if (id === undefined) return;
+
+    // The record is gone (its id is a tombstone), so the directory filter no longer needs
+    // to hide it and no request may be sent for it.
+    if (options?.settled === true) {
+        playgroundSessions.delete(id);
+        return;
+    }
+
+    // The harness cascade has claimed this record and will DELETE it in order. Releasing
+    // the local context now is the whole job; the cascade's own removal is what makes the
+    // request, and it also updates the directory cache/tombstone consistently.
+    if (harnessCascadeSessions.has(id)) return;
 
     const request$ = options?.unload === true ? deleteViewOnUnload(id) : deleteView(id);
 
@@ -7061,23 +7083,37 @@ const selectHarness = (
 };
 
 // ---------------------------------------------------------------------------
-// Deleting a harness (R6)
+// Deleting a harness (R6, R3 cascade)
 // ---------------------------------------------------------------------------
 //
-// DELETE /harnesses/:name is DURABLE and removes the definition only: built-ins go
-// with it, and the server never cascades into sessions (src/server/api.ts). So a
-// conversation already started keeps its frozen definition and stays in the sessions
-// roster — the local state below must not throw those records away.
+// DELETE /harnesses/:name is DURABLE. The server REFUSES it while any session still
+// belongs to the harness (409; packages/underload/harness/src/server/api.ts), and it
+// has no bulk session route by design. The browser therefore automates the only legal
+// order: enumerate every session of the canonical harness from the paged server
+// directory, delete them one at a time through the ordinary session DELETE, and only
+// then send the harness DELETE. Nothing here is a rollback: a failure stops the
+// sequence and reports exactly what was and was not removed.
+//
+// A record left by an EARLIER deletion (legacy orphan data) has no harness row to
+// delete any more, so the directory's archived projection below stays in place: this
+// flow avoids producing new orphans, it does not assume none exist.
 //
 // Confirmation is TWO STEPS on purpose, unlike the one-click session delete: removing
 // a harness is not undoable from this UI (the reader would have to recreate it, and a
 // built-in is gone for every visitor of this server). The first press only ARMS the
-// row (`armedHarness`), the second press on the SAME control sends exactly one DELETE.
-// Nothing else about the row changes, so arming can never select or deselect it.
+// row (`armedHarness`), the second press on the SAME control runs the cascade. Nothing
+// else about the row changes, so arming can never select or deselect it.
 //
-// Harnesses with a DELETE in flight are tracked in `removingHarnesses`; it doubles as
+// Harnesses with a cascade in flight are tracked in `removingHarnesses`; it doubles as
 // the dedupe guard for a double pointer event.
 const removingHarnesses = new Set<string>();
+
+// Session ids the harness cascade has claimed: it will delete each one, in order. The
+// playground's release path consults this so closing the tools view (which a current-session
+// delete triggers through `syncConfigScope`) does not send its own DELETE for a record the
+// cascade is about to delete — a second request could only race, answer 404 and paint
+// `playground cleanup` over the real harness outcome.
+const harnessCascadeSessions = new Set<string>();
 
 // The row currently waiting for its second press. Only one row is armed at a time, so
 // arming another row moves the confirmation instead of creating a second pending state.
@@ -7092,9 +7128,18 @@ let armedHarness: string | undefined;
 //     switch away and the queue keeps running), but the pending figure, the composer's stop
 //     state and the observer this page holds all still belong to the team being deleted,
 //   - a session creation in flight (`creatingSessions`) would make "which harness is
-//     selected" ambiguous exactly when the delete has to reselect one.
+//     selected" ambiguous exactly when the delete has to reselect one,
+//   - a session DELETE in flight (`removingSessions`) would make the cascade re-send an
+//     id it cannot observe the outcome of; the cascade must own every request it waits
+//     on so "all sessions gone" is a fact, not a race.
 const harnessDeletionBlocked = (): boolean =>
-    !booted || submitting || savingAgents || running || creatingSessions > 0 || removingHarnesses.size > 0;
+    !booted ||
+    submitting ||
+    savingAgents ||
+    running ||
+    creatingSessions > 0 ||
+    removingHarnesses.size > 0 ||
+    removingSessions.size > 0;
 
 // Forget one harness the server no longer holds (a 200, or a 404 that says it was
 // already gone). The roster is the only authority for the rail AND for the harness the
@@ -7103,8 +7148,11 @@ const applyHarnessRemoved = (name: string): void => {
     presetDescriptors = presetDescriptors.filter((descriptor) => descriptor.name !== name);
 
     // The instance (its transcript view, panels and observer bindings) dies with its
-    // harness. SAVED SESSIONS are untouched: they are server records, and the directory
-    // cache keeps them for any harness that still exists.
+    // harness. The cascade has ALREADY deleted every session the server listed for the
+    // harness, and each of those deletions forgot its own cache row (`forgetDeletedSession`).
+    // The cache itself is deliberately not filtered by harness here: legacy orphan records
+    // and rows created concurrently keep their truthful state, and the harness removal must
+    // not invent a second, broader deletion.
     const instance = instances.get(name);
     if (instance !== undefined) {
         if (instance === current) {
@@ -7127,8 +7175,15 @@ const applyHarnessRemoved = (name: string): void => {
     }
 
     // R7: the playground's temporary session was created ON this harness. Its core
-    // tools can no longer resolve the definition, so the context goes with it.
-    if (playground.harness === name) releasePlaygroundSession();
+    // tools can no longer resolve the definition, so the context goes with it. When the
+    // cascade already deleted that record (its id is a tombstone), only the local state is
+    // released: a second fire-and-forget DELETE could only answer 404 and repaint
+    // `playground cleanup` over the harness outcome.
+    if (playground.harness === name) {
+        const playgroundId = playground.sessionId;
+
+        releasePlaygroundSession({ settled: playgroundId !== undefined && deletedSessions.has(playgroundId) });
+    }
 
     // The agent library keeps its trusted entries: they belong to the server, not to
     // the deleted harness, and other harnesses may name the same agents.
@@ -7167,8 +7222,10 @@ const applyHarnessRemoved = (name: string): void => {
     }
 
     buildHarnesses();
-    // R6: the deleted harness's conversations become archived immediately — the group is
-    // painted from the same directory cache, which this delete never touches.
+    // R6/R3: the deleted harness's sessions are gone (the cascade deleted them before this
+    // call), so nothing new joins the archived group. The group is painted from the same
+    // directory cache, which this function deliberately never rewrites: a legacy orphan row
+    // or a concurrent session must keep the state its own record reports.
     renderSessions();
 };
 
@@ -7184,7 +7241,7 @@ const emptyStagePane = (): HTMLElement => {
         el(
             'p',
             'field-hint',
-            'Saved sessions for the harness you deleted are still on the server; open them from the Sessions list behind the title above.'
+            'Sessions left behind by an earlier deletion remain on the server; open them from the Sessions list behind the title above.'
         )
     );
 
@@ -7195,6 +7252,11 @@ const emptyStagePane = (): HTMLElement => {
 
 // One press arms, the second deletes. Every dismissal path (selecting another harness,
 // arming a different row, a successful delete) clears the arm, and Escape does too.
+//
+// R3: the second press runs the ordered cascade, never a bare harness DELETE. Every
+// session the server reports for the harness must be gone first (the server's 409 guard
+// counts them), and only a completed cleanup may send the harness DELETE. The two
+// destructive kinds of request are sequential: no `Promise.all`, no bulk route.
 const deleteHarnessRow = async (name: string): Promise<void> => {
     if (harnessDeletionBlocked()) return;
 
@@ -7204,17 +7266,44 @@ const deleteHarnessRow = async (name: string): Promise<void> => {
         return;
     }
 
-    // Second press on the armed row: consume the confirmation BEFORE the request, so a
-    // double pointer event cannot send two DELETEs.
+    // Second press on the armed row: consume the confirmation BEFORE the first request,
+    // so a double pointer event cannot start two cascades.
     armedHarness = undefined;
     removingHarnesses.add(name);
     buildHarnesses();
 
+    // STEP 1 + STEP 2 (enumeration, then one DELETE at a time). The helper handles the
+    // expected failures itself; this catch is the defensive one, so an unexpected throw
+    // can never leave the whole roster locked behind `removingHarnesses`.
+    const cleanup = await deleteHarnessSessions(name).catch(
+        (error: unknown): HarnessSessionCleanup => ({
+            ok: false,
+            message:
+                `session cleanup failed (${messageOf(error)}). Harness ${name} was not deleted; ` +
+                'some sessions may already be gone.'
+        })
+    );
+
+    if (!cleanup.ok) {
+        removingHarnesses.delete(name);
+        // The harness row STAYS: the server still owns it, and `applyHarnessRemoved` must
+        // not run on a partial cleanup. Repainting also clears the in-flight lock and
+        // leaves no stale confirmation on the control.
+        buildHarnesses();
+        setStatus('error', cleanup.message);
+        return;
+    }
+
+    // STEP 3: only now may the harness definition go. A concurrent session created after
+    // the enumeration can still make the server answer 409; that is an honest failure,
+    // not something this flow may hide.
     let deleted = false;
 
     try {
         deleted = (await deleteHarness(name)) !== undefined;
     } catch (error) {
+        // The sessions from the cleanup are already gone (that is a completed fact, not a
+        // rollback), but the harness is not. Keep the row and surface the server's sentence.
         setStatus('error', `delete harness: ${messageOf(error)}`);
         removingHarnesses.delete(name);
         // The row is repainted from the roster the server agreed with, so the control
@@ -7283,10 +7372,11 @@ const buildHarnesses = (): void => {
             armed ? `Confirm delete harness ${descriptor.name}` : `Delete harness ${descriptor.name}`
         );
         // The warning lives on the control, so a reader who never arms it still knows
-        // what the second press costs.
+        // what the second press costs. R3: the cost is the harness AND every session it
+        // owns, because the server refuses the harness DELETE until none are left.
         remove.title = armed
-            ? `Delete ${descriptor.title} (${descriptor.name}) permanently. Press again to confirm, or pick another row to cancel.`
-            : `Delete ${descriptor.title} (${descriptor.name}) permanently. Its saved sessions stay.`;
+            ? `Delete ${descriptor.title} (${descriptor.name}) permanently, including every session it owns. Press again to confirm, or pick another row to cancel.`
+            : `Delete ${descriptor.title} (${descriptor.name}) permanently. Every session it owns is deleted too.`;
         remove.setAttribute('aria-describedby', armed ? `harness-delete-hint-${descriptor.name}` : '');
         if (!armed) remove.removeAttribute('aria-describedby');
         remove.disabled = harnessDeletionBlocked() || removingHarnesses.has(descriptor.name);
@@ -7297,13 +7387,13 @@ const buildHarnesses = (): void => {
 
         if (armed) {
             // The confirmation is text, not only a repainted button: it names exactly
-            // what is about to happen and what survives, and it is the description the
-            // armed control points at.
+            // what is about to happen (irreversible deletion of every session first, then
+            // the harness) and it is the description the armed control points at.
             row.dataset.armed = 'true';
             const hint = el(
                 'p',
                 'field-hint harness-delete-hint',
-                `Delete “${descriptor.title}” (${descriptor.name}) permanently? Its saved sessions stay, and this cannot be undone from the UI.`
+                `Delete “${descriptor.title}” (${descriptor.name}) permanently? Every session and conversation it owns will be deleted first, and this cannot be undone from the UI.`
             );
             hint.id = `harness-delete-hint-${descriptor.name}`;
             row.append(hint);
@@ -11884,12 +11974,13 @@ const upsertSession = (session: SessionRecord): void => {
 // Eight characters is the same prefix the server's logs are readable by.
 const shortId = (id: string): string => (id.length <= 8 ? id : id.slice(0, 8));
 
-// Is this session's harness MISSING from the registry? R6: deleting a harness removes the
-// definition only — the server never cascades into sessions — so a conversation that
-// started before the delete survives as a durable record. `canonicalHarnessName` resolves a
-// legacy alias to its canonical name but returns an unknown name unchanged, so "archived"
-// is exactly the case where that canonical name has no descriptor: the record is intact, the
-// definition is gone.
+// Is this session's harness MISSING from the registry? The harness-delete flow now deletes
+// every session it can list BEFORE removing the definition, so the UI stops producing new
+// orphans; this projection remains for LEGACY orphans (a harness removed outside this page,
+// a record left by an earlier version) and for a concurrent session that made the server
+// keep the harness. `canonicalHarnessName` resolves a legacy alias to its canonical name but
+// returns an unknown name unchanged, so "archived" is exactly the case where that canonical
+// name has no descriptor: the record is intact, the definition is gone.
 const archivedHarnessOf = (session: SessionRecord): string | undefined => {
     const canonical = canonicalHarnessName(session.harness, presetDescriptors);
 
@@ -11946,11 +12037,12 @@ const visibleSessions = (): SessionRecord[] => sessionsOfHarness(selectedName);
 // (`paintSessionCycle`) walks it to answer "which session is next?", so the dashboard and
 // the pill can never disagree about membership or order.
 //
-// Selected harness first. Then (R6) the conversations of a harness the reader deleted:
-// the server never cascades, and with no rail group to hold them any more they stay
-// listed, flagged `archived`, exactly as reachable as before. A session already in the
-// first list is skipped, so an archived harness that is CURRENTLY selected is never
-// listed twice.
+// Selected harness first. Then (R6) the conversations of a harness the registry no longer
+// has: the current delete flow removes every session it can list first, so these are
+// LEGACY orphan records (or a concurrent session that made the server keep the harness).
+// With no rail group to hold them any more they stay listed, flagged `archived`, exactly
+// as reachable as before. A session already in the first list is skipped, so an archived
+// harness that is CURRENTLY selected is never listed twice.
 type SessionDirectoryEntry = { session: SessionRecord; archived: boolean };
 
 const sessionDirectory = (): SessionDirectoryEntry[] => {
@@ -12160,6 +12252,10 @@ const forgetDeletedSession = (id: string): void => {
     // the conversation after its row is gone (see `deletedSessions`).
     deletedSessions.add(id);
 
+    // A temporary playground session was hidden by this filter. Once its record is gone
+    // the tombstone is the whole story, so the filter has no future work to do here.
+    playgroundSessions.delete(id);
+
     // The directory cache is what every later render (and `refreshSessions`) reads,
     // so the row disappears from here first.
     sessions = sessions.filter((session) => session.id !== id);
@@ -12224,48 +12320,223 @@ const forgetDeletedSession = (id: string): void => {
     setBusy(false);
 };
 
+// What one destructive session request settled as. `failed` carries the server's own
+// sentence, because both callers report it (the rail as `delete session: …`, the harness
+// cascade as a partial-cleanup error).
+type SessionRemoval =
+    | { state: 'removed' }
+    | { state: 'alreadyGone' }
+    | { state: 'failed'; message: string };
+
+// The ONE destructive session path, shared by a rail press (`deleteSessionRow`) and the
+// harness cascade (`deleteHarnessSessions`): exactly one DELETE /sessions/:id, the existing
+// "Unknown session" 404 acceptance, and the same tombstone/cache forgetting. The caller
+// owns `removingSessions` and the status copy, because the two surfaces report progress
+// differently (a pill names one id; the cascade names a prefix of a list).
+const removeSessionRecord = async (id: string): Promise<SessionRemoval> => {
+    try {
+        await deleteView(id);
+    } catch (error) {
+        // A 404 means the server holds no such session (deleted from another browser, or
+        // a stale id after a server restart). The end state the user asked for already
+        // holds, so the row is dropped without claiming our DELETE achieved it. `api.ts`
+        // keeps the wire contract unchanged; the message check is the same one `run()`
+        // uses for an unknown session.
+        if (messageOf(error).includes('Unknown session')) return { state: 'alreadyGone' };
+
+        // The row STAYS: nothing was removed, and the caller decides where the message
+        // belongs (the app-scoped pill for a rail press; the harness error for the
+        // cascade).
+        return { state: 'failed', message: messageOf(error) };
+    }
+
+    // The caller forgets the record AFTER releasing `removingSessions`: `forgetDeletedSession`
+    // repaints the controls (a current-session delete calls `setBusy(false)`), and the harness
+    // delete controls consult that set. Releasing first is what makes the repaint show the
+    // truthful "no session delete is in flight" state.
+    return { state: 'removed' };
+};
+
 // Send the DELETE (T1/R1: this is what ONE click on `.session-pill-delete` does). Exactly
 // one request per action: the row is marked busy before the round trip, and every
 // entry point re-checks the guards.
 const deleteSessionRow = async (id: string): Promise<void> => {
-    if (deletionBlocked() || removingSessions.has(id)) return;
+    // R3 cascade: a harness deletion owns the destructive window. A rail press must not
+    // race it with a second session DELETE for an id the cascade has not reached yet.
+    if (deletionBlocked() || removingSessions.has(id) || removingHarnesses.size > 0) return;
 
     removingSessions.add(id);
-    // Paint the in-flight state (the control is disabled while the request runs).
-    renderSessions();
 
-    let removed = false;
-    let alreadyGone = false;
+    // The `finally` releases the in-flight id even if a local repaint throws: an
+    // unexpected UI failure must not leave this session permanently "being deleted" (and,
+    // through `harnessDeletionBlocked`, keep the harness delete locked).
+    const result = await (async (): Promise<SessionRemoval> => {
+        // Paint the in-flight state (the control is disabled while the request runs).
+        renderSessions();
+        return removeSessionRecord(id);
+    })().finally(() => removingSessions.delete(id));
 
-    try {
-        await deleteView(id);
-        removed = true;
-    } catch (error) {
-        // A 404 means the server holds no such session (deleted from another
-        // browser, or a stale id after a server restart). The end state the user
-        // asked for already holds, so the row is dropped without claiming our
-        // DELETE achieved it. `api.ts` keeps the wire contract unchanged; the
-        // message check is the same one `run()` uses for an unknown session.
-        if (messageOf(error).includes('Unknown session')) alreadyGone = true;
-        else {
-            // The row STAYS: nothing was removed. Rail operations report in the
-            // app-scoped pill (like a failed `refreshSessions`); a conversation
-            // pane note would describe whichever chat happens to be on screen.
-            setStatus('error', `delete session: ${messageOf(error)}`);
-        }
-    } finally {
-        removingSessions.delete(id);
-    }
-
-    if (!removed && !alreadyGone) {
+    if (result.state === 'failed') {
         // Failure: the row stays and the control is enabled again; the rail reports
-        // the reason in the app pill.
+        // the reason in the app pill (like a failed `refreshSessions`); a conversation
+        // pane note would describe whichever chat happens to be on screen.
+        setStatus('error', `delete session: ${result.message}`);
         renderSessions();
         return;
     }
 
+    // A successful DELETE and a 404 both drop every local trace of the record; the
+    // tombstone keeps a late stream/poll/POST answer from resurrecting it.
     forgetDeletedSession(id);
-    setStatus('idle', removed ? `session ${shortId(id)} deleted` : `session ${shortId(id)} was already gone`);
+    setStatus(
+        'idle',
+        result.state === 'removed' ? `session ${shortId(id)} deleted` : `session ${shortId(id)} was already gone`
+    );
+};
+
+// Cleanup outcome the harness delete needs to decide whether it may continue. A failure
+// means the harness DELETE must NOT be sent; `message` is already user-facing and states
+// the exact progress and the fact that the harness survived.
+type HarnessSessionCleanup = { ok: true } | { ok: false; message: string };
+
+// Delete every session the SERVER reports for one canonical harness, in directory order,
+// stopping at the first failure (R3).
+//
+// The server's `harness` filter is exact on the frozen preset name
+// (packages/underload/harness/src/server/api.ts `getSessions`), which is the same field
+// its harness DELETE counts for the 409 ownership guard, so this list IS the set the
+// guard checks. `listAllSessions` walks every cursor before returning: enumeration is
+// COMPLETE before the first destructive request, and the local 25-row cache is never
+// consulted.
+//
+// One request at a time on purpose: the server has no bulk route, and a sequential
+// prefix is what lets a failure report "N of M removed" truthfully. There is no rollback
+// and no success claim after a partial cleanup.
+const deleteHarnessSessions = async (name: string): Promise<HarnessSessionCleanup> => {
+    let listed: SessionSummary[];
+
+    try {
+        // 100 is the contract's page maximum (../shared/harness-api.ts HARNESS_PAGE_LIMIT),
+        // so a large conversation set costs the fewest round trips the server allows.
+        listed = await listAllSessions({ harness: name, limit: 100 });
+    } catch (error) {
+        // Non-destructive failure: no session DELETE and no harness DELETE have been sent.
+        return {
+            ok: false,
+            message: `could not list sessions of ${name} (${messageOf(error)}). No session or harness was deleted.`
+        };
+    }
+
+    // The row's OWN harness must match too. The server filter is the authority, but a
+    // server that ignores `?harness=` (or a misbehaving gateway) must never turn this
+    // cleanup into a cross-harness deletion. A single foreign/missing owner means the
+    // enumeration cannot be trusted AT ALL: fail before the first DELETE (including the
+    // harness one), rather than deleting the matching subset and guessing about the rest.
+    const foreign = listed.find((session) => session.harness !== name);
+
+    if (foreign !== undefined) {
+        const owner =
+            typeof foreign.harness === 'string' && foreign.harness.length > 0
+                ? foreign.harness
+                : 'an unknown harness';
+
+        return {
+            ok: false,
+            message:
+                `could not verify sessions of ${name} (the server returned session ` +
+                `${shortId(foreign.id)} for ${owner}). No session or harness was deleted.`
+        };
+    }
+
+    // Tombstoned ids are already gone locally; a late page cannot make this flow send a
+    // DELETE for one. `listAllSessions` removed duplicate ids across pages.
+    const owned = listed.filter((session) => !deletedSessions.has(session.id));
+
+    // Claim every id BEFORE the first DELETE. Deleting the current conversation closes the
+    // tools view (`syncConfigScope` -> `setToolsView(false)`), whose release path would
+    // otherwise fire its own DELETE for the playground session while this cascade is
+    // about to delete it. The set is cleared in `finally`, so a partial failure releases the
+    // claim with the requests it was guarding.
+    for (const session of owned) harnessCascadeSessions.add(session.id);
+
+    try {
+        let removed = 0;
+
+        for (const session of owned) {
+            // A write that owns the app may have started after the confirmation (a submit,
+            // an agent save, a session create). Stop BEFORE the next destructive request:
+            // the remaining rows stay, and the harness DELETE is not sent.
+            if (deletionBlocked()) {
+                return {
+                    ok: false,
+                    message:
+                        `session cleanup failed after ${removed} of ${owned.length} sessions were deleted or already absent ` +
+                        `(another operation is in progress). Harness ${name} was not deleted.`
+                };
+            }
+
+            // The same in-flight guard a rail press uses. The harness entry itself is
+            // blocked while a session delete is in flight (`harnessDeletionBlocked`), so this
+            // is defensive: the cascade must own every request whose outcome it waits on.
+            if (removingSessions.has(session.id)) {
+                return {
+                    ok: false,
+                    message:
+                        `session cleanup failed after ${removed} of ${owned.length} sessions were deleted or already absent ` +
+                        `(session ${shortId(session.id)} is already being deleted). Harness ${name} was not deleted.`
+                };
+            }
+
+            removingSessions.add(session.id);
+
+            // PER-ITERATION `finally`: a local/UI throw may reject this iteration, but it
+            // must never leak the in-flight id into the global `harnessDeletionBlocked`
+            // lock. The release also happens before the forget/status paint below, so the
+            // repaint sees the truthful "no session delete in flight" state.
+            const result = await (async (): Promise<SessionRemoval> => {
+                // Visible progress: the reader pressed a destructive action and must see the
+                // ordered work, not a frozen row. The pill is app-scoped, like every harness write.
+                setStatus('saving', `deleting sessions: ${removed + 1}/${owned.length} (${name})`);
+                renderSessions();
+
+                // Await before the next iteration: never `Promise.all`, and never two
+                // session DELETEs on the wire at once.
+                return removeSessionRecord(session.id);
+            })().finally(() => removingSessions.delete(session.id));
+
+            if (result.state === 'failed') {
+                // Stop immediately: the later rows are untouched and the harness remains.
+                // The already-removed prefix is a completed fact (their cache rows and
+                // tombstones were updated by `forgetDeletedSession`), never something this
+                // flow rolls back.
+                renderSessions();
+                return {
+                    ok: false,
+                    message:
+                        `session cleanup failed after ${removed} of ${owned.length} sessions were deleted or already absent ` +
+                        `(${result.message}). Harness ${name} was not deleted.`
+                };
+            }
+
+            // A deleted playground record must stop being reusable IMMEDIATELY. A later
+            // cascade step can fail, and leaving `playground.sessionId` pointing at this
+            // tombstoned id would make the next playground call reuse it and the pane's
+            // close send a second DELETE. `settled` is id-aware (it captures whatever
+            // `playground.sessionId` is NOW), so a newer playground context is untouched.
+            if (playground.sessionId === session.id) releasePlaygroundSession({ settled: true });
+
+            // A success and a 404 both mean the record is no longer on the server, so the
+            // same forget path keeps the cache, tombstones and pills truthful.
+            forgetDeletedSession(session.id);
+            removed += 1;
+        }
+
+        return { ok: true };
+    } finally {
+        // Every return above (success or a partial failure) ends the cascade's claim. A
+        // retry is allowed to own these ids again.
+        for (const session of owned) harnessCascadeSessions.delete(session.id);
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -15037,12 +15308,13 @@ const openSession = async (
     let descriptor = descriptorFor(harnessName);
 
     if (descriptor === undefined) {
-        // R6: the harness was deleted AFTER this conversation started. The delete removes
-        // the DEFINITION only — the server never cascades into sessions — so the record is
-        // still authoritative and still opens. What it opens WITH is the definition frozen
-        // inside the snapshot (the team, models and tools the run actually used), NOT a
-        // registry entry: nothing is re-added to `presetDescriptors`, so a deleted harness
-        // is never silently resurrected by reading one of its chats.
+        // R6: the harness is gone BEFORE this conversation (a LEGACY orphan record, or a
+        // harness removed outside this page — the current delete flow removes a harness's
+        // sessions first). The record is still authoritative and still opens. What it opens
+        // WITH is the definition frozen inside the snapshot (the team, models and tools the
+        // run actually used), NOT a registry entry: nothing is re-added to
+        // `presetDescriptors`, so a deleted harness is never silently resurrected by reading
+        // one of its chats.
         // The ARCHIVED decision is made on the document's own field ONLY, never on the
         // cached definition answer: a record that never captured a team must be refused,
         // and the conversation-level definition read (which the agent dialog triggers for
@@ -16631,7 +16903,8 @@ const boot = async (): Promise<void> => {
             // reload of that server does not move them: no chat head, no composer, the
             // centre column names the way back (`emptyStagePane`), and the rail keeps the
             // "No harnesses reported by the server yet." hint `buildHarnesses` painted
-            // above. Saved sessions of the deleted harness stay reachable.
+            // above. A record left by an EARLIER deletion (legacy orphan data) stays
+            // reachable; the current delete flow removes a harness's sessions first.
             agentSlot.hidden = true;
             composer.hidden = true;
             stage.replaceChildren(emptyStagePane());

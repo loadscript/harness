@@ -581,6 +581,134 @@ describe('the session directory', () => {
             '/v1/harness/sessions?limit=2&cursor=c2'
         ]);
     });
+
+    it('fails a repeated empty-page cursor instead of asking forever', async () => {
+        serve({
+            'GET /v1/harness/sessions?limit=2': { limit: 2, next_cursor: 'same', observed_at: T, revision: 9, items: [] },
+            'GET /v1/harness/sessions?limit=2&cursor=same': { limit: 2, next_cursor: 'same', observed_at: T, revision: 9, items: [] }
+        });
+
+        await expect(listAllSessions(2)).rejects.toThrow(
+            'The session directory cursor did not advance.'
+        );
+        // Bounded: the second page repeats the cursor and the walk stops without a third.
+        expect(calls.map((call) => call.url)).toEqual([
+            '/v1/harness/sessions?limit=2',
+            '/v1/harness/sessions?limit=2&cursor=same'
+        ]);
+    });
+
+    it('fails a finite alternating cursor cycle without following it forever', async () => {
+        serve({
+            'GET /v1/harness/sessions?limit=2': { limit: 2, next_cursor: 'c2', observed_at: T, revision: 9, items: [{ ...session, id: 's1' }] },
+            'GET /v1/harness/sessions?limit=2&cursor=c2': { limit: 2, next_cursor: 'c3', observed_at: T, revision: 9, items: [{ ...session, id: 's2' }] },
+            // c2 was already sent: this answer can never reach a new page.
+            'GET /v1/harness/sessions?limit=2&cursor=c3': { limit: 2, next_cursor: 'c2', observed_at: T, revision: 9, items: [{ ...session, id: 's3' }] }
+        });
+
+        await expect(listAllSessions(2)).rejects.toThrow(
+            'The session directory cursor did not advance.'
+        );
+        expect(calls.map((call) => call.url)).toEqual([
+            '/v1/harness/sessions?limit=2',
+            '/v1/harness/sessions?limit=2&cursor=c2',
+            '/v1/harness/sessions?limit=2&cursor=c3'
+        ]);
+    });
+
+    it('bounds a stream that keeps inventing fresh cursors at the page budget', async () => {
+        const routes: Record<string, unknown> = {};
+
+        // Empty pages with a NEW cursor each time: no cycle detection can help, so the
+        // independent page bound is what keeps this request sequence finite.
+        for (let page = 0; page < 200; page += 1) {
+            const url =
+                page === 0
+                    ? '/v1/harness/sessions?limit=100'
+                    : `/v1/harness/sessions?limit=100&cursor=c${page}`;
+
+            routes[`GET ${url}`] = {
+                limit: 100,
+                next_cursor: `c${page + 1}`,
+                observed_at: T,
+                revision: 9,
+                items: []
+            };
+        }
+
+        serve(routes);
+
+        await expect(listAllSessions(100)).rejects.toThrow(
+            'The session directory did not finish within 200 pages.'
+        );
+        expect(calls).toHaveLength(200);
+    });
+
+    it('accepts a complete walk that ends exactly on the 5000-row budget', async () => {
+        const routes: Record<string, unknown> = {};
+        const itemsOf = (page: number): unknown[] =>
+            Array.from({ length: 100 }, (_, index) => ({ ...session, id: `s${page}-${index}` }));
+
+        for (let page = 0; page < 50; page += 1) {
+            const url =
+                page === 0
+                    ? '/v1/harness/sessions?limit=100'
+                    : `/v1/harness/sessions?limit=100&cursor=c${page}`;
+
+            routes[`GET ${url}`] = {
+                limit: 100,
+                next_cursor: page === 49 ? null : `c${page + 1}`,
+                observed_at: T,
+                revision: 9,
+                items: itemsOf(page)
+            };
+        }
+
+        serve(routes);
+
+        const rows = await listAllSessions(100);
+
+        expect(rows).toHaveLength(5_000);
+        expect(rows[0]?.id).toBe('s0-0');
+        expect(rows[4_999]?.id).toBe('s49-99');
+        expect(calls).toHaveLength(50);
+    });
+
+    it('rejects data beyond the 5000-row budget instead of truncating', async () => {
+        const routes: Record<string, unknown> = {};
+        const itemsOf = (page: number, count: number): unknown[] =>
+            Array.from({ length: count }, (_, index) => ({ ...session, id: `s${page}-${index}` }));
+
+        for (let page = 0; page < 50; page += 1) {
+            const url =
+                page === 0
+                    ? '/v1/harness/sessions?limit=100'
+                    : `/v1/harness/sessions?limit=100&cursor=c${page}`;
+
+            routes[`GET ${url}`] = {
+                limit: 100,
+                next_cursor: `c${page + 1}`,
+                observed_at: T,
+                revision: 9,
+                items: itemsOf(page, 100)
+            };
+        }
+
+        routes['GET /v1/harness/sessions?limit=100&cursor=c50'] = {
+            limit: 100,
+            next_cursor: null,
+            observed_at: T,
+            revision: 9,
+            items: itemsOf(50, 1)
+        };
+
+        serve(routes);
+
+        await expect(listAllSessions(100)).rejects.toThrow(
+            'The session directory exceeded 5000 rows.'
+        );
+        expect(calls).toHaveLength(51);
+    });
 });
 
 // ---------------------------------------------------------------------------

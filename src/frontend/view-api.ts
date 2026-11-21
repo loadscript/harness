@@ -1302,23 +1302,89 @@ export const readRecordsDelta = (sessionId: string, since: number): Promise<Reco
 // page when the reader scrolls, never all of them at boot.
 export const listSessionPage = (query: PageQuery = {}): Promise<Page<SessionSummary>> => listSessions(query);
 
-// Every directory page, used ONLY by the "all conversations" dialog when the reader
-// opens it. Bounded per page, and it stops at the cursor the server says is the end.
-export const listAllSessions = async (limit = 100): Promise<SessionSummary[]> => {
+// Every directory page for ONE query. Its production caller is the harness-delete
+// cleanup (./main.ts `deleteHarnessSessions`), which must know the COMPLETE ownership set
+// before its first destructive request. Bounded per page, and it stops at the cursor the
+// server says is the end.
+//
+// The query is passed through verbatim, which is what lets the cleanup ask the SERVER for
+// `{ harness }` instead of trusting the browser's 25-row directory cache: the server's
+// filter is the ownership set its harness DELETE guard counts. `number` stays accepted as
+// the first argument because the paging contract test (and a caller that only cares about
+// page size) spells it that way.
+//
+// IDs are deduplicated here, not at the call sites: a page boundary that repeats a row
+// must never make a destructive caller send a second DELETE for the same id.
+//
+// TERMINATION is part of the contract, because a cursor loop would otherwise lock the
+// harness delete forever: a repeated/non-advancing cursor fails immediately, and the row
+// and page budgets bound streams that keep inventing fresh cursors. A walk that ends
+// exactly ON the row budget is complete and legal; only data/cursors BEYOND the bounds
+// fail. A truncated list is never returned: the destructive caller must see the failure.
+const SESSION_DIRECTORY_ROW_BUDGET = 5_000;
+const SESSION_DIRECTORY_PAGE_BUDGET = 200;
+
+export const listAllSessions = async (options: number | PageQuery = 100): Promise<SessionSummary[]> => {
+    const query = typeof options === 'number' ? { limit: options } : options;
+    const limit = query.limit ?? 100;
+
     const rows: SessionSummary[] = [];
-    let cursor: string | null | undefined;
+    const seenIds = new Set<string>();
+    // Every cursor this walk has SENT, including a caller-supplied starting position. A
+    // server that ever names one of these again can never reach a new page.
+    const seenCursors = new Set<string>();
+    let cursor: string | null | undefined = query.cursor ?? undefined;
+    let fetched = 0;
+    let pages = 0;
 
-    do {
-        const page = await listSessionPage({ limit, ...(cursor === null || cursor === undefined ? {} : { cursor }) });
-        rows.push(...page.items);
-        cursor = page.nextCursor;
+    if (cursor !== null && cursor !== undefined && cursor.length > 0) seenCursors.add(cursor);
 
-        // A collection the size of the contract's own budget is the practical end;
-        // without this a pathological cursor loop could run forever.
-        if (rows.length >= 5_000) break;
-    } while (cursor !== null && cursor !== undefined && cursor.length > 0);
+    while (true) {
+        const page = await listSessionPage({
+            ...query,
+            limit,
+            ...(cursor === null || cursor === undefined ? {} : { cursor })
+        });
 
-    return rows;
+        pages += 1;
+
+        for (const row of page.items) {
+            // The budget counts RAW rows, not deduplicated ones, so a server that repeats
+            // one row forever still cannot spin this walk forever.
+            fetched += 1;
+
+            if (fetched > SESSION_DIRECTORY_ROW_BUDGET) {
+                throw new Error(`The session directory exceeded ${SESSION_DIRECTORY_ROW_BUDGET} rows.`);
+            }
+
+            if (seenIds.has(row.id)) continue;
+
+            seenIds.add(row.id);
+            rows.push(row);
+        }
+
+        const next = page.nextCursor;
+
+        // TERMINATION FIRST: a cursor-less answer is the complete listing, even when the
+        // walk landed exactly on the row budget (50 full pages is a legal server listing).
+        if (next === null || next === undefined || next.length === 0) return rows;
+
+        // A cursor can never make progress by repeating one this walk already sent. This
+        // catches the empty-page `next_cursor: 'same'` loop after its second page and an
+        // A -> B -> A cycle before the fourth request.
+        if (next === cursor || seenCursors.has(next)) {
+            throw new Error('The session directory cursor did not advance.');
+        }
+
+        // Another page is still owed. The page budget is the supported bound; a stream
+        // that exceeds it has not proven it can finish, so the read fails as non-destructive.
+        if (pages >= SESSION_DIRECTORY_PAGE_BUDGET) {
+            throw new Error(`The session directory did not finish within ${SESSION_DIRECTORY_PAGE_BUDGET} pages.`);
+        }
+
+        seenCursors.add(next);
+        cursor = next;
+    }
 };
 
 // ---------------------------------------------------------------------------
