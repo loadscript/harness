@@ -2551,9 +2551,14 @@ it('adds a picker agent, makes it the entry agent, and never duplicates a member
     selectConfigured('summarizer');
     expect(memberToggle().disabled).toBe(true);
     expect(memberToggle().title).toBe('The entry agent is always part of the team: every harness needs an entry point.');
-    // The lock explanation PARAGRAPH is still gone (its reason lives on the locked control);
-    // the panel prints no field note here at all.
-    expect(document.querySelector('.agent-dialog-field-note')).toBeNull();
+    // The lock explanation PARAGRAPH is still gone (its reason lives on the locked control), and so
+    // is every other note: this fixture states no `agent_prefixes`, so the identified read answers
+    // WITHOUT the property, the capability is off, and the preset section — with its standing note —
+    // stays hidden (./agent-prefixes-main.test.ts pins the capability rule; a read that merely
+    // ANSWERS is not a stated band map). The exact list of notes is what pins the missing paragraph.
+    expect(
+        [...document.querySelectorAll<HTMLElement>('.agent-dialog-field-note')].map((note) => note.className)
+    ).toEqual([]);
 });
 
 it('views another agent configuration without moving the entry agent or PATCHing the team', async () => {
@@ -2760,9 +2765,14 @@ it('drops a removed member from the roster and offers it back through the add pi
     selectConfigured('instruct');
     expect(memberToggle().disabled).toBe(true);
     expect(memberToggle().title).toBe('The entry agent is always part of the team: every harness needs an entry point.');
-    // The lock explanation PARAGRAPH is still gone (its reason lives on the locked control);
-    // the panel prints no field note here at all.
-    expect(document.querySelector('.agent-dialog-field-note')).toBeNull();
+    // The lock explanation PARAGRAPH is still gone (its reason lives on the locked control), and so
+    // is every other note: this fixture states no `agent_prefixes`, so the identified read answers
+    // WITHOUT the property, the capability is off, and the preset section — with its standing note —
+    // stays hidden (./agent-prefixes-main.test.ts pins the capability rule). The exact list is what
+    // pins the missing lock paragraph.
+    expect(
+        [...document.querySelectorAll<HTMLElement>('.agent-dialog-field-note')].map((note) => note.className)
+    ).toEqual([]);
 });
 
 it('views a saved conversation’s team and saves a model draft through the session PATCH', async () => {
@@ -4768,9 +4778,12 @@ it('deletes the running current session, stops watching and creates no replaceme
     // harness always has one) — there is no paragraph to say it.
     expect(memberToggle().disabled).toBe(true);
     expect(memberToggle().title).toBe('The entry agent is always part of the team: every harness needs an entry point.');
-    // The lock explanation PARAGRAPH is still gone (its reason lives on the locked control);
-    // the panel prints no field note here at all.
-    expect(document.querySelector('.agent-dialog-field-note')).toBeNull();
+    // The lock explanation PARAGRAPH is still gone (its reason lives on the locked control), and so
+    // is every other note: this fixture's harness rows state no `agent_prefixes` at all, so the
+    // capability is off and the preset section — with its standing note — stays hidden.
+    expect(
+        [...document.querySelectorAll<HTMLElement>('.agent-dialog-field-note')].map((note) => note.className)
+    ).toEqual([]);
 
     // The agent outside the team is reachable through `[+]` now, and its add is a live
     // draft the reader can still cancel.

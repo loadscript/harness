@@ -113,7 +113,7 @@ import type {
     SessionViewSummary,
     ToolDescriptor
 } from '../server/protocol';
-import type { AgentRank, HarnessUsage } from '../types';
+import type { AgentRank, HarnessPrefixTurn, HarnessUsage } from '../types';
 import type { DisplayStep, TurnDisplayOp, TurnSummary, TurnStepDetail, TurnBlockDetail } from '../shared/turn-display';
 // The pending-tool figure a cold display tree states per section (./view-api.ts
 // `readTurnDisplayWithPending`), seeded into the store as the `pending:set` ops it
@@ -285,6 +285,12 @@ import {
     // definition (src/server/api.ts:4921-4968).
     createSessionThread,
     getSessionAgentInstruction,
+    // U6: the ONE member's effective PRESET HISTORY (the ordered system/user/assistant turns a
+    // conversation seeds after its instruction block). Asked for on the same explicit action as
+    // the instruction read — opening the configuration dialog — because it answers a fact no other
+    // read states for a live conversation, and it is an ARRAY per member, so it stays out of the
+    // roster row exactly like instruction text does.
+    getSessionAgentPrefix,
     listSessionAgents,
     updateSessionAgent,
     updateSession,
@@ -310,6 +316,11 @@ import type { HarnessBootstrap } from './api';
 import type { SessionView as RenderSessionView, ThreadTranscriptPayload, TurnRowView } from './view-model';
 import {
     agentColorsOf,
+    // U6: the preset-history band accessors. `prefixBandOf` projects the per-agent session read,
+    // `statedPrefixesOf` answers the capability question the three text maps never had to answer
+    // ("was this map stated at all?"), `prefixesForMembers` builds the COMPLETE map a harness PATCH
+    // has to send, and `prefixStateTextOf` is the one canonical spelling the no-op guard compares.
+    agentPrefixesOf,
     agentInstructionsOf,
     agentModelsOf,
     agentsFromDescriptors,
@@ -323,7 +334,13 @@ import {
     entryOf,
     membersOf,
     modelsForMembers,
+    prefixBandOf,
+    prefixesCopyOf,
+    prefixesForMembers,
+    prefixStateTextOf,
     ranksOf,
+    samePrefixMap,
+    statedPrefixesOf,
     uniqueNames
 } from './contract';
 import { createCreateHarnessPanel } from './ui/create-harness';
@@ -5931,6 +5948,22 @@ type Instance = {
     // SESSION-level colour map would land. Same rule as `harnessModels`: undefined = never
     // read, and a failed read keeps whatever this browser already had.
     harnessColors?: Record<string, string>;
+    // U6: the harness template's per-agent PRESET-HISTORY bands (`agent_prefixes`), read on the
+    // same explicit action as the two maps above (opening the configuration dialog — the
+    // identified definition read is the only publisher, ../shared/harness-api.ts
+    // `HarnessDefinition.agent_prefixes`). Same undefined rule as `harnessModels`: undefined =
+    // never read, so a failed read keeps whatever this browser had. For the bands that rule is not
+    // cosmetic: PRESENCE of a known map is the capability flag the dialog renders from
+    // (./ui/agent-dialog.ts `AgentDialogOptions.prefixes`), so an unread band map can never be
+    // painted as "seeds nothing" or restated destructively on a save.
+    harnessPrefixes?: Record<string, HarnessPrefixTurn[]>;
+    // U6 (R6): a saved conversation's OWN effective bands, one lazy read per roster member
+    // (./api.ts `getSessionAgentPrefix`), exactly parallel to `harnessInstructions` carrying a
+    // session's live prompt text. Undefined = never read (or every read failed, which is what a
+    // build without the route answers) — the preset editor stays hidden rather than inventing an
+    // empty baseline. A member whose own read failed is absent from the map, which is the honest
+    // reading of "this browser was not told what this member seeds".
+    sessionPrefixes?: Record<string, HarnessPrefixTurn[]>;
     // Tools toolRequest enabled for this session (SessionSnapshot.discoveredTools),
     // shown on the tools view's session note (R21.2 — there is no core dropdown any
     // more). Refreshed by the snapshot a core call triggers.
@@ -6700,6 +6733,17 @@ const replaceDescriptor = (updated: HarnessDescriptor): void => {
         // that clears a colour (`agent_colors: {}`) has to clear the cache as well, or the
         // removed hex would keep painting this conversation's identities from a stale read.
         existing.harnessColors = agentColorsOf(updated);
+
+        // U6: the bands ride the same refresh, with the rule the two text maps never needed —
+        // `statedPrefixesOf` rather than `agentPrefixesOf`, because the cache's `undefined` is the
+        // capability flag itself. A descriptor that STATES `agent_prefixes` (including a `{}` clear)
+        // restates the cache; a descriptor that names no map leaves it exactly as it was, since a
+        // card/definition that omits the field says nothing about what the template seeds
+        // (../shared/harness-api.ts `HarnessDefinition.agent_prefixes`) and overwriting with `{}`
+        // would let the next save clear bands this browser never saw.
+        const statedPrefixes = statedPrefixesOf(updated);
+
+        if (statedPrefixes !== undefined) existing.harnessPrefixes = statedPrefixes;
     }
 };
 
@@ -7602,6 +7646,44 @@ const storedColorsOf = (display: HarnessDescriptor, instance: Instance): Record<
     ...(instance.harnessColors ?? {}),
     ...agentColorsOf(display)
 });
+
+// U6: the per-agent PRESET-HISTORY bands this browser believes are STORED, or `undefined` when it
+// has never been told — and that `undefined` is the whole point of the accessor's shape. The three
+// text maps above can always answer with `{}` ("nothing is overridden") because restating an empty
+// text map costs nothing. A band map cannot: the harness PATCH REPLACES `agent_prefixes` and `{}`
+// is the explicit clear, so a shell that invented an empty map for a load that never answered would
+// wipe every band the server still holds on its next save. So the answer is a MAYBE, and
+// ./ui/agent-dialog.ts renders presence as the capability flag: no map, no preset editor.
+//
+// Which sources are allowed to make the answer known, per scope:
+//   - A HARNESS TEMPLATE: the identified definition read the dialog's open performs
+//     (`instance.harnessPrefixes`, ./api.ts `getHarness`), or a document that STATES the map itself
+//     (an unredacted server, or the boot catalogue, whose `presets` rows carry the domain mirror
+//     `agentPrefixes`, ../server/protocol.ts). A read that FAILED leaves the cache untouched, which
+//     is why "unread" and "read, and nothing seeds any member" stay distinguishable forever.
+//   - A SAVED CONVERSATION: its own per-member effective read (`instance.sessionPrefixes`,
+//     ./api.ts `getSessionAgentPrefix`) — that answer already resolves the layers, so the frozen
+//     definition's copy is only the fallback for a member it has not answered for.
+//
+// The per-key precedence then follows `storedInstructionsOf` exactly: a template's own document
+// wins, and a conversation's live read wins, because a saved chat seeds its own history and the
+// frozen copy is creation-time fact.
+const storedPrefixesOf = (
+    display: HarnessDescriptor,
+    instance: Instance
+): Record<string, HarnessPrefixTurn[]> | undefined => {
+    // The document's own statement, `undefined` when it states none — `agentPrefixesOf` cannot
+    // answer that question, because it folds an absent field into `{}`.
+    const stated = statedPrefixesOf(display);
+    const live = instance.sessionId === undefined ? instance.harnessPrefixes : instance.sessionPrefixes;
+
+    if (stated === undefined && live === undefined) return undefined;
+
+    return instance.sessionId === undefined
+        ? { ...(live ?? {}), ...agentPrefixesOf(display) }
+        : { ...agentPrefixesOf(display), ...(live ?? {}) };
+};
+
 type AgentView = {
     display: HarnessDescriptor;
     members: string[];
@@ -7630,6 +7712,19 @@ type AgentView = {
     // composer button, the dialog badges and the transcript tiles are three different
     // components, and only this one map can keep them agreeing (R4).
     colors: Record<string, string>;
+    // U6: the stored per-agent PRESET-HISTORY bands, and the answer to "may this dialog edit them
+    // at all" in ONE value. OPTIONAL BY CONTRACT: `undefined` means this browser has never been
+    // told what any member seeds (no identified definition read yet, no session band read yet), and
+    // the dialog renders NO preset editor at all — the pre-U6 dialog, byte for byte. A known map,
+    // INCLUDING an empty one, enables the editor for every rostered member, and a member the map
+    // omits honestly seeds nothing.
+    //
+    // Why the view carries it rather than the dialog reading the caches: the composer button, the
+    // dialog and `applyAgentConfiguration`'s write path all need the SAME answer (the same argument
+    // that put `instructions`, `models` and `colors` here), and the save path merges the reader's
+    // deltas onto THIS map — merging onto a raw document field would wipe bands a compiled view
+    // never carried. See `storedPrefixesOf`.
+    prefixes?: Record<string, HarnessPrefixTurn[]>;
     // R5/R6/R7 (T7b): what the DIALOG is allowed to do, derived once here so the composer
     // button, the dialog and the write path can never disagree about the scope.
     //   - `scope` is where a save lands: 'session' edits THIS conversation's roster,
@@ -7737,6 +7832,18 @@ const agentViewOf = (instance: Instance): AgentView => {
     // still the colour the reader learned for it.
     const colors = storedColorsOf(display, instance);
 
+    // U6: the PRESET-HISTORY bands, through the one accessor that also answers the capability
+    // question (see `storedPrefixesOf`). The map is then reduced to `members` in MEMBER ORDER, for
+    // two reasons that both show up in assertions: the dialog paints one editor per rostered tab,
+    // so a band keyed by an agent this definition no longer lists would be shown for nobody; and the
+    // dialog's change-detector (`agentDialogSignatureOf`) and the save's no-op guard both compare
+    // this map, so it needs ONE stable spelling — member order — rather than whatever key order the
+    // last response happened to arrive in. `prefixesForMembers` keeps a keyed `[]` (a member that
+    // seeds nothing is a stated value) and drops a member the map omits (it seeds nothing, and an
+    // absent key says that already).
+    const statedPrefixes = storedPrefixesOf(display, instance);
+    const prefixes = statedPrefixes === undefined ? undefined : prefixesForMembers(statedPrefixes, members);
+
     // The actual model the no-override choice resolves to. For a new session it
     // is the typed model, else the server default (what mergeSettings applies to a
     // blank request).
@@ -7793,6 +7900,9 @@ const agentViewOf = (instance: Instance): AgentView => {
         models,
         instructions,
         colors,
+        // U6: `undefined` (never told what any member seeds) or the member-ordered band map. The
+        // dialog's preset editor and the save path's merge BOTH read this one value.
+        prefixes,
         fallback,
         scope: locked ? 'session' : 'harness',
         // R7: only a session can gain an agent the catalogue never advertised; R5: only a
@@ -8126,6 +8236,12 @@ const agentDialogOptionsOf = (view: AgentView, instance: Instance) => {
         editable: view.editable,
         models: agentModelSelectOf(view),
         instructions: view.instructions,
+        // U6: the PRESET TURNS editor, and PRESENCE IS THE FLAG (./ui/agent-dialog.ts
+        // `editsPrefixTurns`). `view.prefixes` is `undefined` exactly when this browser has never
+        // been told what any member seeds, and spreading NOTHING here is what keeps those hosts —
+        // and those conversations — on the pre-U6 dialog with no preset section and no `prefixes`
+        // delta. A known map, even an empty one, enables the editor for every rostered member.
+        ...(view.prefixes === undefined ? {} : { prefixes: view.prefixes }),
         // R5/R6/R7 + R20: the capability flags the dialog renders from — where a save
         // lands, whether `[+]` may take a typed name, whether `Set as entry` and the rank
         // stepper exist here, and which members a conversation already runs. Derived in
@@ -8171,6 +8287,17 @@ const agentDialogSignatureOf = (view: AgentView): string =>
         // the signature — otherwise the definition read that revealed a colour would repaint
         // nothing and the badges would keep the automatic tones.
         colors: view.colors,
+        // U6: the preset bands are part of what the dialog PAINTS too (one editor per rostered
+        // tab), so a band-only answer has to move the signature or the read that revealed it would
+        // repaint nothing and an open tab would keep showing the old history. Two details make this
+        // safe rather than merely short: `agentViewOf` builds the map in MEMBER ORDER with every
+        // turn projected, so the SAME server state always produces the SAME string no matter what
+        // key order a response arrived in; and a band is an ARRAY inside that string, so a reordered
+        // history is a different signature — never an unordered compare. `undefined` (no capability)
+        // also differs from `{}` (capability, nothing seeded), which is the difference that adds or
+        // removes the whole section. A reader's own draft lives in the dialog's draft layer, so this
+        // repaint re-seeds only the tabs they have NOT touched.
+        prefixes: view.prefixes,
         fallback: view.fallback,
         // T7b (R5/R6/R7): the dialog's SHAPE depends on the scope flags, and in a session the
         // removal controls depend on which members a conversation runs. A thread appearing or
@@ -8251,7 +8378,26 @@ const loadHarnessConfiguration = (instance: Instance): void => {
             // tones at all.
             const colors = agentColorsOf(definition);
 
-            // An unredacted definition states its own overrides, so the summary walk is not
+            // U6/F2: the PRESET-HISTORY bands this definition seeds, read as the CAPABILITY FLAG
+            // it is — and the flag is the PROPERTY, not the fact that the route answered. Three
+            // states, and the middle one is the whole correction:
+            //   - the identified read STATES the map (`../shared/harness-api.ts
+            //     HarnessDefinition.agent_prefixes` is always present on a U6 server, `{}` when the
+            //     definition seeds nothing) → the cache records it, and a `{}` is an empty editor
+            //     the reader may fill in, not an unknown one;
+            //   - the read ANSWERS but names no `agent_prefixes` at all → a backend from BEFORE the
+            //     prefix feature. Folding that answer into `{}` (what `agentPrefixesOf` does) would
+            //     arm an editor whose save PATCHes a field that same server refuses with 400
+            //     "Unknown field", so the cache is left EXACTLY as it was — `undefined` — which is
+            //     how the shell keeps the pre-U6 dialog and never sends the field;
+            //   - the read FAILED (404, foreign name, network) → the guards above returned, so the
+            //     cache is untouched for the same reason, and a band load that never answered can
+            //     never be sent back as the destructive `{}` clear.
+            // `statedPrefixesOf` is the accessor that can tell the first two apart;
+            // `agentPrefixesOf` cannot, because it folds an absent field into `{}`.
+            const prefixes = statedPrefixesOf(definition);
+
+            // T11: an unredacted definition states its own overrides, so the summary walk is not
             // needed at all; otherwise only the rows this definition supplies are fetched.
             const stated = agentInstructionsOf(definition);
             const stored =
@@ -8267,17 +8413,25 @@ const loadHarnessConfiguration = (instance: Instance): void => {
             // T4: colours are part of that equality. A definition that ONLY changed its colour
             // map (or answered one for the first time) has to refresh, or the explicit tones
             // would sit unread until the next unrelated frame.
-            if (
-                sameStringMap(instance.harnessModels, models) &&
-                sameStringMap(instance.harnessInstructions, stored) &&
-                sameStringMap(instance.harnessColors, colors)
-            ) {
-                return;
-            }
+            //
+            // U6: bands are part of it too, through `samePrefixMap` rather than `sameStringMap`,
+            // and deliberately so — that helper treats `undefined` (never read) as DIFFERENT from
+            // `{}` (read, nothing seeded), because for bands that difference is the editor's very
+            // existence. A first read that came back empty therefore records the map and repaints,
+            // while a second identical read stays a no-op. F2 adds the third case: an answer that
+            // names no map is not a change at all, because there is nothing to record.
+            const modelsMoved = !sameStringMap(instance.harnessModels, models);
+            const instructionsMoved = !sameStringMap(instance.harnessInstructions, stored);
+            const colorsMoved = !sameStringMap(instance.harnessColors, colors);
+            const prefixesMoved =
+                prefixes !== undefined && !samePrefixMap(instance.harnessPrefixes, prefixes);
+
+            if (!modelsMoved && !instructionsMoved && !colorsMoved && !prefixesMoved) return;
 
             instance.harnessModels = models;
             instance.harnessInstructions = stored;
             instance.harnessColors = colors;
+            if (prefixes !== undefined) instance.harnessPrefixes = prefixes;
             if (current !== instance) return;
 
             // `refreshAgentDialog` is signature-guarded: unchanged state repaints nothing,
@@ -8290,8 +8444,16 @@ const loadHarnessConfiguration = (instance: Instance): void => {
             // button (whose identity tone just changed) and ends in `refreshAgentDialog`; the
             // extra refresh below is only for the branch where the TOOLS view owns the centre
             // and that chrome paint returns early — the open dialog still has to follow.
+            //
+            // U6: the chrome rebuild is gated on the state the chrome ACTUALLY paints, and a band
+            // map is not part of it — the preset editor lives only inside this dialog. Without the
+            // gate, the first band read (the capability turning on) rebuilds the composer chip at
+            // the exact moment the dialog opens, which replaces the node a press-and-hold still
+            // owns and drops the `data-hold` affordance mid-gesture
+            // (./composer-agent-control.test.ts:958-968 pins the held state while the finger is
+            // down). A bands-only answer therefore refreshes the dialog and leaves the rail alone.
             configureAgentColorsFor(view);
-            renderHarnessChrome();
+            if (modelsMoved || instructionsMoved || colorsMoved) renderHarnessChrome();
             refreshAgentDialog(view, instance);
         })
         .catch(() => {
@@ -8351,6 +8513,13 @@ const loadHarnessColors = (instance: Instance, sessionId: string): void => {
 // — since T6 a stored override IS the complete prompt, so the box must show exactly this answer
 // and nothing composed from the harness map. A read that fails leaves that one member out,
 // which is honest: `storedInstructionsOf` then falls back to the definition's text for it.
+//
+// U6 ADDED A SECOND READ PER MEMBER, for the same reason in the other direction: the preset band
+// (`GET .../agents/{id}/prefix`) is an ARRAY of turns, so it stays out of the roster row exactly
+// like the prompt does, and this route is the only one that states what THIS conversation seeds
+// after the instruction block. Both reads are bounded by the same roster, and the band half records
+// NOTHING unless at least one member answered — the capability flag must not turn on over a map the
+// server never stated. See `instance.sessionPrefixes` and `storedPrefixesOf`.
 const loadSessionConfiguration = async (instance: Instance, sessionId: string): Promise<void> => {
     const list = await listSessionAgents(sessionId);
 
@@ -8370,12 +8539,47 @@ const loadSessionConfiguration = async (instance: Instance, sessionId: string): 
         })
     );
 
+    // U6: the SAME walk, one band per member. WHY ONE READ PER MEMBER rather than the definition's
+    // `agent_prefixes`: the definition copy states what the harness template seeds, while this route
+    // answers what THIS conversation actually seeds after its instruction block — the contract
+    // resolves the layers (`source: harness | session | none`) and hands over the ordered turns,
+    // which is exactly the baseline the preset editor needs. The roster row carries no band for the
+    // same reason it carries no prompt: the value is an array per member.
+    //
+    // WHY THE SAME FAILURE DISCIPLINE: a member that left this roster 404s and a build without the
+    // route answers 404/405 for every member. Either way the shell invents nothing — the member is
+    // simply absent from the map below — and when NOTHING answered, the cache is left untouched so
+    // "unread" keeps meaning unread instead of degrading into a `{}` baseline the next save would
+    // send back as a clear.
+    const bands = await Promise.all(
+        list.agents.map(async (binding): Promise<[string, HarnessPrefixTurn[]] | undefined> => {
+            try {
+                const band = await getSessionAgentPrefix(sessionId, binding.agent_id);
+
+                return [binding.agent_id, prefixBandOf(band.prefix)];
+            } catch {
+                return undefined;
+            }
+        })
+    );
+
     const stored = Object.fromEntries(entries.filter((entry): entry is [string, string] => entry !== undefined));
+    // Only members the band read ANSWERED are in here; `bands.length > 0 && answered === 0` is the
+    // "this build has no prefix route" signal, and it is answered by NOT recording the map at all.
+    const answered = bands.filter((entry): entry is [string, HarnessPrefixTurn[]] => entry !== undefined);
+    const prefixes = Object.fromEntries(answered);
 
     // Nothing moved: no repaint, and no caret loss for a reader already typing.
-    if (sameStringMap(instance.harnessInstructions, stored)) return;
+    const instructionsMoved = !sameStringMap(instance.harnessInstructions, stored);
+    // `samePrefixMap` answers `false` for an unread cache even against an empty map, so the FIRST
+    // successful band read always records (that is the capability turning on), while a later
+    // identical read stays a no-op.
+    const bandsRecorded = answered.length > 0 && !samePrefixMap(instance.sessionPrefixes, prefixes);
 
-    instance.harnessInstructions = stored;
+    if (!instructionsMoved && !bandsRecorded) return;
+
+    if (instructionsMoved) instance.harnessInstructions = stored;
+    if (bandsRecorded) instance.sessionPrefixes = prefixes;
 
     if (current !== instance) return;
 
@@ -8384,8 +8588,13 @@ const loadSessionConfiguration = async (instance: Instance, sessionId: string): 
     // Same funnel as the template read above: the palette is re-derived BEFORE anything paints
     // from it (T4), the composer button follows the roster, and the open dialog re-seeds every
     // box with the text this conversation actually runs.
+    //
+    // U6: the chrome rebuild is gated exactly as the template read's is. A band map is painted
+    // ONLY inside the configuration dialog, so a first band read — the capability turning on for a
+    // conversation whose members all seed nothing — must not rebuild the composer chip out from
+    // under a press-and-hold that is still down; the dialog refresh below is the whole effect.
     configureAgentColorsFor(view);
-    renderHarnessChrome();
+    if (instructionsMoved) renderHarnessChrome();
     refreshAgentDialog(view, instance);
 };
 
@@ -8805,6 +9014,26 @@ const applyAgentConfiguration = async (
     const nextModels = modelsForMembers(models, nextMembers);
     const nextInstructions = instructionsForMembers(instructions, nextMembers);
 
+    // U6: the PRESET-HISTORY deltas, merged the same way — onto the map the DIALOG renders from
+    // (`view.prefixes`), never onto a raw document field, because the server REPLACES
+    // `agent_prefixes` and restating only what one frame carried would wipe every band the reader
+    // can still see. Two rules differ from the two text maps, and both come from the value being an
+    // ordered ARRAY rather than a string:
+    //   - a touched band is a COMPLETE ordered replacement, and an explicit `[]` is a VALUE, not a
+    //     clear-to-delete: the contract spells "this member starts with the instruction alone" with
+    //     that empty array, so the key stays (a deleted key would say the same thing to the server
+    //     but lose the reader's stated decision the moment another member's band is cleared);
+    //   - the merge is skipped entirely while the capability is off (`view.prefixes === undefined`).
+    //     Then `patchAgents` gets `undefined` below and OMITS the field, which is the only safe
+    //     answer: an empty map would clear every band this browser never read.
+    const prefixes: Record<string, HarnessPrefixTurn[]> = { ...(view.prefixes ?? {}) };
+
+    for (const [name, band] of Object.entries(changes.prefixes ?? {})) {
+        prefixes[name] = [...band];
+    }
+
+    const nextPrefixes = view.prefixes === undefined ? undefined : prefixesForMembers(prefixes, nextMembers);
+
     // Same server state means the same request would be a pointless round trip. The
     // dialog cannot normally get here (its action stays disabled while nothing is
     // pending), so this is a guard against a stale tab rather than a UX path.
@@ -8827,12 +9056,20 @@ const applyAgentConfiguration = async (
         JSON.stringify(nextModels) === JSON.stringify(view.models) &&
         JSON.stringify(nextInstructions) ===
             JSON.stringify(view.instructions) &&
+        // U6: a preset-band edit is a change, so it has to be in this guard or a band-only draft
+        // would answer "Nothing changed." and never reach the PATCH. Both sides go through
+        // `prefixStateTextOf`, which is the ONE canonical spelling: member order, projected turns,
+        // array order preserved (a reordered band is a different answer, so no set compare may
+        // stand in), and a band of zero turns left out because it states the same server fact as no
+        // key at all. When the capability is off, both sides are `{}` — an unread map is never a
+        // change, which is what keeps a legacy server out of the request.
+        prefixStateTextOf(nextPrefixes ?? {}, nextMembers) === prefixStateTextOf(view.prefixes ?? {}, members) &&
         !busy
     ) {
         return { applied: false, message: 'Nothing changed.' };
     }
 
-    return await patchAgents(entry, ranks, nextMembers, nextModels, nextInstructions);
+    return await patchAgents(entry, ranks, nextMembers, nextModels, nextInstructions, nextPrefixes);
 };
 
 // ---------------------------------------------------------------------------
@@ -8885,8 +9122,20 @@ const applySessionConfiguration = async (
     const existingRankWork = rankEntries.filter(
         ([name]) => existing.includes(name) && !additions.includes(name)
     );
+    // U6: the PRESET-HISTORY deltas. The dialog only names a member whose band editor was touched
+    // (./ui/agent-dialog.ts `collectChanges`), and each value is that member's COMPLETE ordered list
+    // — an emptied editor is `[]`, a real band, not an absent band. The band is not filtered here:
+    // additions need their key to find its way onto the create, and step 5 decides which members may
+    // be addressed at all. A band delta is `teamWork` for the same reason a prompt delta is: it
+    // decides what the NEXT request seeds, so the idle-session guard applies (../shared/harness-api.ts
+    // `UpdateSessionAgentRequest.prefix`: "Like an instruction write it needs an idle session").
+    const bandEntries = Object.entries(changes.prefixes ?? {});
     const teamWork =
-        removals.length > 0 || additions.length > 0 || prompts.length > 0 || rankEntries.length > 0;
+        removals.length > 0 ||
+        additions.length > 0 ||
+        prompts.length > 0 ||
+        bandEntries.length > 0 ||
+        rankEntries.length > 0;
     // Only a roster write moves the member set; a prompt or model save re-reads nothing but the
     // text it just wrote (the model PATCH answer is already the newest authority for its field).
     const rosterMoved = removals.length > 0 || additions.length > 0;
@@ -8950,7 +9199,7 @@ const applySessionConfiguration = async (
         // 1. Removals.
         for (const name of removals) await deleteSessionAgent(sessionId, name);
 
-        // 2. Additions, each carrying its own model, RANK and complete prompt.
+        // 2. Additions, each carrying its own model, RANK, complete prompt and preset band.
         for (const name of additions) {
             const model = (changes.models[name] ?? '').trim();
             const instruction = (changes.instructions[name] ?? '').trim();
@@ -8958,13 +9207,21 @@ const applySessionConfiguration = async (
             // agent added without one inherits the session's roster default, so the field
             // is omitted rather than invented here.
             const rank = changes.ranks?.[name];
+            // U6: a new member's band rides its create too, so a `[+]` pick with both a typed
+            // prompt and a preset history is ONE request. The key test is `!== undefined`, not
+            // length: an explicit `[]` is a stated decision ("this member starts with no preset
+            // history") that OVERRIDES the band the harness definition would seed for a bound
+            // profile member (../shared/harness-api.ts `CreateSessionAgentRequest.prefix`), so
+            // dropping an empty band here would silently inherit instead of clearing.
+            const band = changes.prefixes?.[name];
 
             await createSessionAgent(sessionId, {
                 name,
                 profile: name,
                 ...(rank === undefined ? {} : { rank }),
                 ...(model.length === 0 ? {} : { model }),
-                ...(instruction.length === 0 ? {} : { instruction })
+                ...(instruction.length === 0 ? {} : { instruction }),
+                ...(band === undefined ? {} : { prefix: [...band] })
             });
         }
 
@@ -8978,16 +9235,43 @@ const applySessionConfiguration = async (
         // 4. The roster the writes produced, BEFORE anything is addressed by member name.
         if (rosterMoved || existingRankWork.length > 0) await refreshSessionRoster(instance, sessionId);
 
-        // 5. Prompts for the members that were ALREADY on this team (an added member's text
-        //    travelled with its create, so restating it here would be a second write of the
-        //    same bytes).
-        for (const [name, text] of prompts) {
-            if (!existing.includes(name)) continue;
+        // 5. Prompts and preset bands for the members that were ALREADY on this team (an added
+        //    member's text and band travelled with its create, so restating either here would be a
+        //    second write of the same bytes).
+        //
+        // U6: ONE request per member, not one per field. `UpdateSessionAgentRequest`
+        // (../shared/harness-api.ts:1940-1975) accepts `instruction` and `prefix` in the same closed
+        // body and states the same rule for both — an omitted key is no change — so a member whose
+        // prompt AND band were both edited is patched once, and a member whose band alone was edited
+        // is patched without an `instruction` key at all (which would otherwise rewrite the whole
+        // prompt from whatever the box happened to hold).
+        //
+        // The band is never sent as `null` from this dialog: `null` means "drop this session's
+        // override and re-seed from the frozen definition", a fact the editor has no control for, and
+        // the contract spells the reader's own clear — "no preset history" — with `[]`, which is a
+        // complete band. Order is the dialog's insertion order (prompts first, then any band-only
+        // member), so one save stays predictable in the request log.
+        const bandOf = new Map(bandEntries);
+        const touched: string[] = [];
 
-            const instruction = text.trim();
+        for (const [name] of prompts) {
+            if (existing.includes(name) && !touched.includes(name)) touched.push(name);
+        }
+
+        for (const name of bandOf.keys()) {
+            if (existing.includes(name) && !touched.includes(name)) touched.push(name);
+        }
+
+        for (const name of touched) {
+            const band = bandOf.get(name);
+            const hasPrompt = Object.prototype.hasOwnProperty.call(changes.instructions, name);
+            const instruction = hasPrompt ? (changes.instructions[name] ?? '').trim() : undefined;
 
             await updateSessionAgent(sessionId, name, {
-                instruction: instruction.length > 0 ? instruction : null
+                ...(instruction === undefined
+                    ? {}
+                    : { instruction: instruction.length > 0 ? instruction : null }),
+                ...(band === undefined ? {} : { prefix: [...band] })
             });
         }
 
@@ -9084,6 +9368,13 @@ const patchAgents = async (
     members: readonly string[],
     models: Readonly<Record<string, string>>,
     instructions: Readonly<Record<string, string>>,
+    // U6: the COMPLETE band map this request states, or `undefined` when this browser has never
+    // been told what any member seeds. The distinction is load-bearing: the field is a whole-map
+    // REPLACE, so an omitted field keeps every stored band while a `{}` clears them all, and only a
+    // caller that KNOWS the map may decide between those two. A `[]` inside the map is a real value
+    // ("this member starts with the instruction alone") and survives to the wire — the contract's
+    // own spelling of a single-member clear is `{ "agent_prefixes": { "editor": [] } }`.
+    prefixes?: Readonly<Record<string, HarnessPrefixTurn[]>>,
     label = 'agent configuration'
 ): Promise<AgentApplyResult> => {
     const instance = current;
@@ -9128,6 +9419,19 @@ const patchAgents = async (
     // explicit clear server-side (../server/api.ts `patchHarness`: "Present = REPLACE the map;
     // `{}` is the explicit clear"), so no server change is needed for the clear to land.
     const sendsModels = includeModels || Object.keys(storedModelsOf(display, instance)).length > 0;
+    // U6: the same discipline for the third whole-map field, with one case the two text maps never
+    // had. `prefixes === undefined` is not "an empty map", it is "this browser has never been told",
+    // and an empty map sent on that basis would clear every band the server holds — so the
+    // undefined answer is an OMITTED field, which the contract keeps unchanged. Once the map IS
+    // known, the rule is the one above: send it whenever it names a band, and also when nothing is
+    // left to send but something IS stored, because that is the explicit clear (`{}`) the reader
+    // just performed by removing the last band or the member that carried it. A `[]` inside the map
+    // is a value that survives into the body, not a key to delete.
+    const storedPrefixes = storedPrefixesOf(display, instance);
+    const sendsPrefixes =
+        prefixes !== undefined &&
+        (Object.keys(prefixes).length > 0 || (storedPrefixes !== undefined && Object.keys(storedPrefixes).length > 0));
+
 
     savingAgents = true;
     // R3: `saving` is the visible word; the label says WHAT is being saved in the
@@ -9153,7 +9457,15 @@ const patchAgents = async (
             entry: nextEntry,
             ranks: nextRanks,
             ...(sendsModels ? { agent_models: models } : {}),
-            ...(sendsInstructions ? { agent_instructions: instructions } : {})
+            ...(sendsInstructions ? { agent_instructions: instructions } : {}),
+            // U6: the third whole-map field, and the only one of the three whose OMITTED state is the
+            // common case rather than an edge case. `sendsPrefixes` is false exactly when this browser
+            // has never read a band map (`prefixes === undefined`) — an omitted field then keeps every
+            // stored band, which is the safe answer — or when nothing is known and nothing is stored,
+            // where sending `{}` would be a clear nobody asked for. When the map IS known it always
+            // rides: either it restates the bands the reader edited, or it is the explicit `{}`/`[]`
+            // clear they performed (../shared/harness-api.ts:861-873).
+            ...(sendsPrefixes ? { agent_prefixes: { ...prefixes } } : {})
         });
         // descriptorOf is the canonical card/definition -> render descriptor mapping (./api.ts);
         // the cast is nominal only: the protocol type carries legacy optional fields this
@@ -9171,6 +9483,15 @@ const patchAgents = async (
         if (live !== undefined) {
             if (sendsModels) live.harnessModels = { ...models };
             if (sendsInstructions) live.harnessInstructions = { ...instructions };
+            // U6: the bands were REPLACED by exactly what was sent, so the template cache is restated
+            // from the request rather than from the answer — the identified read a PATCH answer carries
+            // publishes `agent_prefixes` only when the definition seeds at least one band, so an empty
+            // map (the clear) would otherwise read back as "stated nothing" and the next save would
+            // offer to wipe the bands again. Gated on `prefixes !== undefined`, NOT on `sendsPrefixes`:
+            // a map that is known but neither sent nor stored (`prefixes === {}`, nothing stored) is
+            // still a known-empty baseline the cache must hold, and the omitted-field case must leave
+            // the cache untouched, because the server kept its bands too.
+            if (prefixes !== undefined) live.harnessPrefixes = prefixesCopyOf(prefixes);
         }
 
         buildHarnesses();

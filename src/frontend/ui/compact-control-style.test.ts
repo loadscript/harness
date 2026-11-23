@@ -156,6 +156,27 @@ it('imports the agent dialog stylesheet and keeps the single-writer action botto
     expect(editor).toContain('min-height: 128px');
     expect(editor).toContain('resize: vertical');
 
+    // The PRESET TURNS editor (the underload agent `prefix`) is a real editor too, and it
+    // is built from the same primitives: a row grid whose content track is the flexible one
+    // (`minmax(0, 1fr)`, so a long turn wraps INSIDE its box instead of widening the panel),
+    // a resizable content box, in-flow row controls, and a phone layout that gives the text
+    // the full width instead of shrinking it. The shared `--radius-sm` token is pinned for
+    // every selector in the sheet by the radius guard below, so these rules only have to
+    // prove the LAYOUT contract.
+    const turn = blockOf('.agent-dialog-prefix-row {', agentDialogRules);
+    expect(turn).toContain('display: grid');
+    expect(turn).toContain('grid-template-columns: 96px minmax(0, 1fr) auto');
+    expect(turn).toContain('align-items: start');
+    expect(blockOf('.agent-dialog-prefix-content {', agentDialogRules)).toContain('resize: vertical');
+    expect(blockOf('.agent-dialog-prefix-action {', agentDialogRules)).toContain('cursor: pointer');
+    expect(blockOf('.agent-dialog-prefix-add {', agentDialogRules)).toContain('align-self: flex-start');
+    // An empty history is PAINTED (framed, readable), so the state is visible rather than a
+    // blank gap the reader has to interpret.
+    expect(blockOf('.agent-dialog-prefix-empty {', agentDialogRules)).toContain('1px dashed var(--border)');
+    const phoneTurns = blockOf('@media (max-width: 720px) {', agentDialogRules);
+    expect(phoneTurns).toContain('.agent-dialog-prefix-row');
+    expect(phoneTurns).toContain('grid-template-areas');
+
     // Footer: the note takes the remaining width and the action is pinned to the far
     // right, which is what makes "bottom right" the reading order rather than a guess.
     // No rule sits above the action: the footer is separated by space, not a divider.

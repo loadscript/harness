@@ -698,6 +698,27 @@ export type HarnessProviderConfiguration = {
 // Agent (the brain)
 // ---------------------------------------------------------------------------
 
+// ONE PRESET PREFIX TURN (U6) — the CLOSED, text-only spelling of a turn of preset agentic
+// history: an entry of `AgentConfiguration.prefix`, of the harness wire contract's
+// `agent_prefixes` map (../shared/harness-api.ts `HarnessPrefixTurn` is a verbatim alias of THIS
+// type), and of a session's per-agent prefix override.
+//
+// WHY A SEPARATE TYPE WHEN `prefix` ALREADY HAS ONE: `prefix` is the wider engine field (a seed
+// entry may carry attachments), while the SURFACE that edits a band — the configuration dialog —
+// is role + text only. Spelling that as its own type is what lets the wire refuse a `tool` role or
+// a `toolCall` key instead of silently dropping it.
+//
+// DISCRIMINATED UNION, one member per role, and that shape is load-bearing: it is assignable BOTH
+// ways to `Extract<HarnessMessage, { role: 'system' | 'user' | 'assistant' }>` (a member carries no
+// key that variant lacks, and the variant carries no REQUIRED key this member lacks), which is what
+// lets a band go straight into `AgentConfiguration.prefix` with no conversion pass — while a `tool`
+// turn stays unrepresentable by construction, because a tool result answers an assistant
+// `tool_calls` block a prefix never carries.
+export type HarnessPrefixTurn =
+    | { role: 'system'; content: string }
+    | { role: 'user'; content: string }
+    | { role: 'assistant'; content: string };
+
 // Everything needed to construct a brain. `name` is optional: inside a harness
 // the registry key names the agent (see harness.ts), so `writer: agent({...})`
 // is enough. Standalone agents keep the default label.
@@ -708,7 +729,21 @@ export type AgentConfiguration = {
     // System instruction(s). A string or a list; each entry becomes its own
     // system message, in order, so persona + rules + format can compose.
     instruction?: string | string[];
-    // Seed history. Instructions are prepended ahead of these.
+    // Preset agentic HISTORY — the ordered turns a spawn starts with, AFTER every `instruction`
+    // system message and BEFORE `messages`. `instruction` says "you are X"; this says "this has
+    // already happened".
+    //
+    // ROLES: `system | user | assistant` only — a `tool` turn answers an assistant `tool_calls`
+    // block this field never carries, so the type refuses it rather than adding a runtime rule.
+    // The harness wire contract's narrower `HarnessPrefixTurn` (role + text) is what the
+    // configuration dialog edits and what the REST routes carry; it is assignable here in both
+    // directions, so no conversion pass sits between the two.
+    //
+    // EDITABLE (U6): a harness template's band is the `agent_prefixes` map of its definition, and a
+    // saved conversation overrides its own member with a session write; both are seeded history,
+    // never a rewrite of a transcript a session already accumulated.
+    prefix?: Extract<HarnessMessage, { role: 'system' | 'user' | 'assistant' }>[];
+    // Seed history. Instructions and `prefix` are prepended ahead of these.
     messages?: HarnessMessage[];
     // Endpoint config for the built-in transport.
     provider?: HarnessProviderConfiguration;

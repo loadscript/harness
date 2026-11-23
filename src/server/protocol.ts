@@ -13,6 +13,7 @@ import type {
     HarnessErrorInfo,
     HarnessEvent,
     HarnessMessage,
+    HarnessPrefixTurn,
     HarnessRunStopReason,
     HarnessUsage,
     ToolMediaDescriptor,
@@ -432,6 +433,20 @@ export type HarnessDescriptor = {
     // `Agent.color` for that member, so the swatch a card paints and the swatch a
     // session's agents carry are the same bytes.
     agentColors?: Record<string, string>;
+    // PER-AGENT PRESET HISTORY (U6): agent id → that member's complete ordered band of seeded
+    // `system` / `user` / `assistant` turns. PRESENT ONLY WHEN the definition seeds at least one
+    // band, so every existing card keeps its exact shape — and unlike the three text maps above,
+    // a band is an ARRAY, which is why an entry keyed with `[]` still counts as "configured":
+    // "this member seeds no history" is a decision the definition owns and the read must echo.
+    //
+    // It is the UNTOUCHED definition statement, not the session's current band: a session's own
+    // override lives in its preset copy, and this copy is what a `null` prefix patch restores from
+    // (canonical `packages/underload/harness/src/server/sessions.ts` `setSessionAgentPrefix`), so
+    // no session write ever rewrites it. The shell never sends this camelCase field: every harness
+    // PATCH spells the map `agent_prefixes` on the generated wire type (../shared/harness-api.ts
+    // `UpdateHarnessRequest`), and `descriptorOf` (../frontend/api.ts) is the boundary that maps it
+    // back in for rendering.
+    agentPrefixes?: Record<string, HarnessPrefixTurn[]>;
     // Shipped with the application vs created through POST /harnesses. Informational
     // only: every harness in the in-memory registry is an editable application copy
     // of a template or a client-created harness.

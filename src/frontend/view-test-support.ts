@@ -40,7 +40,7 @@ import type { AgentResultBlock, AgentResultTurn } from '../shared';
 // The rank vocabulary comes from the kernel barrel, exactly where production reads it: the
 // double has no letter set of its own, so a fixture rank the guard rejects is no rank here
 // and on the wire alike.
-import type { AgentRank } from '../types';
+import type { AgentRank, HarnessPrefixTurn } from '../types';
 import { isAgentRank } from '../types';
 // `LOWEST_RANK` is the SERVER's rule for a member no rank map names (an agent has no
 // authority the definition did not grant it), and the double states it from the same
@@ -624,6 +624,39 @@ const currentEpoch = (): number => epochHost()[EPOCH_KEY] ?? 0;
 export const bumpFixtureEpoch = (): void => {
     epochHost()[EPOCH_KEY] = currentEpoch() + 1;
 };
+
+// ---------------------------------------------------------------------------
+// U6: the PRESET-HISTORY projection (one band, and a map of bands)
+// ---------------------------------------------------------------------------
+//
+// `HarnessPrefixTurn` is the discriminated union role + text ONLY (../types/index.ts:717), which is
+// also the closed wire shape of `agent_prefixes` and of `SessionPrefixTurnsResponse.prefix`. The
+// double projects every band through these two helpers so a fixture may write either spelling, in
+// either depth, and the browser only ever receives the contract's bytes. ORDER IS PRESERVED on
+// purpose — a band is the history an agent seeds, so the same turns in another order are different
+// state, and a double that sorted them would agree with a client that sorted them by mistake. A turn
+// outside `system|user|assistant` or without string text is dropped rather than stored: the real
+// server refuses such a body with 400, and the double has no validator.
+const prefixTurnsOf = (value: readonly unknown[]): HarnessPrefixTurn[] =>
+    value
+        .filter((turn): turn is { role: HarnessPrefixTurn['role']; content: string } => {
+            if (turn === null || typeof turn !== 'object') return false;
+            const { role, content } = turn as { role?: unknown; content?: unknown };
+
+            return (
+                (role === 'system' || role === 'user' || role === 'assistant') && typeof content === 'string'
+            );
+        })
+        .map((turn) => ({ role: turn.role, content: turn.content }));
+
+// The whole `agent_prefixes` map: copied per key (never the fixture's own object, which the client
+// would then mutate through the response) with every band projected. A non-array value is the
+// contract's "this member has no band" — `HarnessDefinition.agent_prefixes` only ever maps members
+// to arrays — so it is published as an empty band rather than dropped.
+const prefixTurnsOfMap = (map: Record<string, unknown>): Record<string, HarnessPrefixTurn[]> =>
+    Object.fromEntries(
+        Object.entries(map).map(([name, band]) => [name, prefixTurnsOf(Array.isArray(band) ? band : [])])
+    );
 
 export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {}): StubHandler => {
     const root = options.root ?? HARNESS_API_ROOT;
@@ -1270,6 +1303,9 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
         kind: 'bound' | 'custom';
         model?: string;
         instruction?: string;
+        // U6: the preset history this member was CREATED with (`CreateSessionAgentRequest.prefix`).
+        // An array of zero turns is a stated value, so the field is kept even when empty.
+        prefix?: HarnessPrefixTurn[];
     };
 
     type SessionAgentOverlay = {
@@ -1279,6 +1315,12 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
         // the agent inherits again (../shared/harness-api.ts:1002-1011).
         instructions: Record<string, string>;
         models: Record<string, string>;
+        // U6: one agent's session-level PRESET BAND, same three states as `instructions` — an
+        // omitted PATCH key is no change, an array (including `[]`) REPLACES the band, and an
+        // explicit `null` deletes this key so the member is re-seeded from the frozen definition
+        // (../shared/harness-api.ts `UpdateSessionAgentRequest.prefix`). A band is an ORDERED list,
+        // so the double stores the array it was given verbatim: no sort, no dedupe, no trim.
+        prefixes: Record<string, HarnessPrefixTurn[]>;
         // R20: a rank re-stated on this session. The server accepts one only before the
         // conversation starts; the double applies it to the binding row and the definition.
         ranks: Record<string, AgentRank>;
@@ -1296,6 +1338,7 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
             removed: [],
             instructions: {},
             models: {},
+            prefixes: {},
             ranks: {}
         };
         sessionAgentWrites.set(id, created);
@@ -1423,6 +1466,20 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
         if (input.model === null) delete overlay.models[agent];
         else if (typeof input.model === 'string' && input.model.trim().length > 0) {
             overlay.models[agent] = input.model.trim();
+        }
+
+        // U6: the band, with the same three states as `instruction` above. An array — INCLUDING an
+        // empty one — REPLACES the whole band, and `null` deletes this session's override so the
+        // member is re-seeded from its frozen definition (../shared/harness-api.ts
+        // `UpdateSessionAgentRequest.prefix`). Stored VERBATIM: a preset history is ordered text the
+        // server never trims, so a sort or trim here would let the double disagree with the next read.
+        // A turn outside `system|user|assistant` or without string text is dropped rather than
+        // stored — the real server refuses such a body with 400, and the double has no validator, so
+        // keeping the well-formed turns is the closest honest answer (the closed wire object means a
+        // shell that sent anything else has a bug the asserted request body already shows).
+        if (input.prefix === null) delete overlay.prefixes[agent];
+        else if (Array.isArray(input.prefix)) {
+            overlay.prefixes[agent] = prefixTurnsOf(input.prefix);
         }
     };
 
@@ -1663,7 +1720,21 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                           // them would make the double deny the client a field its own source named.
                           ...(entry.agent_colors === undefined && entry.agentColors === undefined
                               ? {}
-                              : { agent_colors: entry.agent_colors ?? entry.agentColors })
+                              : { agent_colors: entry.agent_colors ?? entry.agentColors }),
+                          // U6: the preset-history bands follow the SAME unredacted-server rule the
+                          // comment above describes. `HarnessDefinition.agent_prefixes` states the
+                          // contract's own limit — "a card in a LIST row never carries it" — so a
+                          // fixture that states no map is answered as a real list answers: absent, and
+                          // the client has to ask the identified read. A row that DOES state one keeps
+                          // it, because dropping a field the fixture named would let the double claim
+                          // the capability is off when its own source says it is not.
+                          ...(entry.agent_prefixes === undefined && entry.agentPrefixes === undefined
+                              ? {}
+                              : {
+                                    agent_prefixes: prefixTurnsOfMap(
+                                        (entry.agent_prefixes ?? entry.agentPrefixes) as Record<string, unknown>
+                                    )
+                                })
                       }
                     : key === 'tools'
                       ? { ...entry, session_bound: entry.sessionBound ?? false }
@@ -1841,6 +1912,12 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
             // T4: the per-agent identity colours, in either spelling (a fixture writes camelCase,
             // the contract reads snake_case).
             const colors = definition.agent_colors ?? definition.agentColors;
+            // U6: the per-agent PRESET-HISTORY bands, same two-spelling rule. Presence is the whole
+            // story here: a definition that states `agent_prefixes` (even `{}`) is a definition whose
+            // bands the shell may edit, and one that names no map is a server the preset editor never
+            // appears on. Copied per key so a fixture object is never handed to the client by
+            // reference — the client's save mutates its own copy, not the fixture.
+            const statedPrefixes = definition.agent_prefixes ?? definition.agentPrefixes;
             const coreTools = definition.core_tools ?? definition.coreTools;
             const members = membersRaw(definition);
 
@@ -1858,6 +1935,13 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                 ...(coreTools === undefined ? {} : { core_tools: coreTools }),
                 ...(models === undefined || typeof models !== 'object' ? {} : { agent_models: models }),
                 ...(colors === undefined || typeof colors !== 'object' ? {} : { agent_colors: colors }),
+                // U6: absent stays absent (capability off); a stated map, even `{}`, is published in
+                // the contract's spelling with fresh arrays, so the client edits a copy.
+                ...(statedPrefixes === undefined ||
+                typeof statedPrefixes !== 'object' ||
+                Array.isArray(statedPrefixes)
+                    ? {}
+                    : { agent_prefixes: prefixTurnsOfMap(statedPrefixes as Record<string, unknown>) }),
                 instruction_summary: await Promise.all(members.map((agent) => instructionRowOf(definition, agent)))
             };
         };
@@ -1897,9 +1981,15 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                 if (legacy.agent_models !== undefined) legacy.agentModels = legacy.agent_models;
                 if (legacy.agent_instructions !== undefined) legacy.agentInstructions = legacy.agent_instructions;
                 if (legacy.agent_colors !== undefined) legacy.agentColors = legacy.agent_colors;
+                // U6: the third whole-map field, same two-directional translation. A shell fixture
+                // asserts the body in ITS OWN camelCase spelling, and the answer it composes from
+                // that body has to carry the map back for `descriptorOf` to see it — which is how a
+                // test tells `agent_prefixes: {}` (the explicit clear) apart from an omitted field.
+                if (legacy.agent_prefixes !== undefined) legacy.agentPrefixes = legacy.agent_prefixes;
                 delete legacy.agent_models;
                 delete legacy.agent_instructions;
                 delete legacy.agent_colors;
+                delete legacy.agent_prefixes;
 
                 const rawInit = context?.init ?? { method: 'PATCH' };
                 const response = await inner(`${root}/harnesses/${encodeURIComponent(name)}`, innerVerb, legacy, {
@@ -2648,6 +2738,20 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                 ...overlay.models
             };
             const foldedInstructions: Record<string, string> = { ...frozenInstructions };
+            // U6: the frozen definition's preset bands, overlaid with whatever this conversation
+            // stored per member. `agent_prefixes` is published only when at least one band is known
+            // — the contract's own omission rule for the field ("present only when this definition
+            // states at least one", ../shared/harness-api.ts `HarnessDefinition.agent_prefixes`) —
+            // so a conversation on a pre-U6 template keeps the exact read shape it had before and the
+            // shell's preset editor stays off. A member this conversation cleared shows its `[]`,
+            // because an empty band is a stated value, not an absence.
+            const frozenPrefixes = definition.agentPrefixes ?? definition.agent_prefixes;
+            const foldedPrefixes: Record<string, HarnessPrefixTurn[]> = {
+                ...(frozenPrefixes !== undefined && typeof frozenPrefixes === 'object'
+                    ? prefixTurnsOfMap(frozenPrefixes as Record<string, unknown>)
+                    : {}),
+                ...overlay.prefixes
+            };
 
             for (const entry of overlay.added) {
                 // A session-defined member's whole prompt is the sentence it was created with, or
@@ -2687,6 +2791,9 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                     ...(host?.discoveredTools === undefined ? {} : { discovered_tools: host.discoveredTools }),
                     ...(Object.keys(foldedModels).length === 0 ? {} : { agent_models: foldedModels }),
                     ...(Object.keys(foldedInstructions).length === 0 ? {} : { agent_instructions: foldedInstructions }),
+                    ...(Object.keys(foldedPrefixes).length === 0
+                        ? {}
+                        : { agent_prefixes: prefixTurnsOfMap(foldedPrefixes) }),
                     // T4: the identity-colour map rides the same re-expression. Without it a fixture that
                     // colours its FROZEN definition would answer this route with the team but never the
                     // colours, and a shell test could not tell that apart from a server that stored none.
@@ -2765,8 +2872,18 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                         : {}),
                     ...(typeof input.instruction === 'string' && input.instruction.trim().length > 0
                         ? { instruction: input.instruction }
-                        : {})
+                        : {}),
+                    // U6: a create may state the member's whole band (`CreateSessionAgentRequest
+                    // .prefix`). `[]` is KEPT, not dropped: for a bound profile member it OVERRIDES
+                    // the band the harness definition seeds down to nothing, so discarding an empty
+                    // array here would report an inherited history the reader just cleared.
+                    ...(Array.isArray(input.prefix) ? { prefix: prefixTurnsOf(input.prefix) } : {})
                 });
+
+                // U6: the create's band is ALSO this conversation's stored band for the member, so a
+                // later `null` patch has something to drop back to the definition
+                // (`applySessionAgentPatch`), and the per-agent read below answers from the same key.
+                if (Array.isArray(input.prefix)) overlay.prefixes[name] = prefixTurnsOf(input.prefix);
 
                 // The create's instruction is ALSO this session's stored text for the member: a
                 // bound profile gets it as a `preset.agentInstructions` entry (`instruction_source:
@@ -2843,6 +2960,81 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
             });
         }
 
+        // U6: the preset-history subresource, `GET` only (../shared/harness-api.ts
+        // `SessionPrefixTurnsResponse`; the write rides the binding PATCH below, exactly as the
+        // contract states). This is the ONLY read that says what THIS conversation seeds one member
+        // with after its instruction block, and it resolves the two layers the shell must not merge
+        // by hand: what the frozen harness definition seeds, and what this conversation stored over
+        // it. The ladder is the contract's own — `session` for a stored band that DIFFERS from the
+        // definition's bytes, `harness` for the definition's own band (including a session write that
+        // happened to restate it, which no reader can observe as a difference), and `none` when no
+        // layer seeds a history at all.
+        const sessionAgentPrefixMatch = bare.match(/^\/sessions\/([^/]+)\/agents\/([^/]+)\/prefix$/);
+
+        if (sessionAgentPrefixMatch !== null) {
+            const sessionId = decodeURIComponent(sessionAgentPrefixMatch[1]);
+            const agent = decodeURIComponent(sessionAgentPrefixMatch[2]);
+            const direct = await offer();
+
+            if (direct !== undefined) return direct;
+
+            const host = await hostEx(sessionId);
+
+            if (host === undefined) return jsonOf({ error: { message: `Unknown session ${sessionId}` } }, 404);
+
+            const definition = (host.harnessDefinition ?? {}) as Record<string, unknown>;
+            const overlay = sessionAgentOverlayOf(sessionId);
+
+            if (!sessionMembersOf(definition, overlay).includes(agent)) {
+                return jsonOf(
+                    { error: { message: `Agent "${agent}" is not a member of session "${sessionId}".` } },
+                    404
+                );
+            }
+
+            if (verb !== 'GET') {
+                return jsonOf(
+                    { error: { message: `Unsupported ${verb} /sessions/:id/agents/:agent/prefix` } },
+                    405
+                );
+            }
+
+            // The band the frozen definition seeds for this member, or `undefined` when the map names
+            // no key — the two are different facts on this contract ("no band" vs "an explicit empty
+            // band"), and the source ladder below reads that difference.
+            const statedBands = definition.agentPrefixes ?? definition.agent_prefixes;
+            const seeded =
+                statedBands !== undefined &&
+                typeof statedBands === 'object' &&
+                Object.prototype.hasOwnProperty.call(statedBands, agent)
+                    ? prefixTurnsOf(
+                          Array.isArray((statedBands as Record<string, unknown>)[agent])
+                              ? ((statedBands as Record<string, unknown>)[agent] as unknown[])
+                              : []
+                      )
+                    : undefined;
+            const stored = overlay.prefixes[agent];
+            const band = stored ?? seeded ?? [];
+            // Array equality, element by element in order: a band is a history, so the same turns in
+            // another order really are a different answer, which rules out any key/set compare here.
+            const differs =
+                stored !== undefined &&
+                (seeded === undefined ||
+                    stored.length !== seeded.length ||
+                    stored.some((turn, index) => {
+                        const other = seeded[index];
+
+                        return other === undefined || turn.role !== other.role || turn.content !== other.content;
+                    }));
+
+            return jsonOf({
+                session_id: sessionId,
+                agent_id: agent,
+                prefix: band.map((turn) => ({ role: turn.role, content: turn.content })),
+                source: differs ? 'session' : seeded !== undefined ? 'harness' : 'none'
+            });
+        }
+
         const sessionAgentMatch = bare.match(/^\/sessions\/([^/]+)\/agents\/([^/]+)$/);
 
         if (sessionAgentMatch !== null) {
@@ -2903,6 +3095,9 @@ export const withViewRoutes = (inner: StubHandler, options: ViewRouteOptions = {
                 overlay.added = overlay.added.filter((entry) => entry.name !== agent);
                 delete overlay.instructions[agent];
                 delete overlay.models[agent];
+                // U6: the band goes with the member — a detached agent's stored history has no
+                // binding left to re-seed, and a re-added name starts from its definition again.
+                delete overlay.prefixes[agent];
 
                 // A receipt, not the roster: the contract states what detached and leaves the
                 // bounded roster read to the client (../shared/harness-api.ts:1013-1026).

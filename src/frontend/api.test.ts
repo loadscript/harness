@@ -1677,3 +1677,178 @@ describe('descriptor rows', () => {
         expect(cleared.agentColors).toEqual({});
     });
 });
+
+// U6 (U7 integration): the PRESET-HISTORY band map on the same mapper, and the one route that
+// reads a band per session agent. A band is the ordered `system|user|assistant` history a NEW
+// conversation is seeded with after its instruction (../types/index.ts:717 `HarnessPrefixTurn`,
+// ../shared/harness-api.ts `HarnessDefinition.agent_prefixes`), and unlike the three text maps its
+// `undefined`-vs-`{}` difference is LOAD-BEARING: the shell shows its preset editor only over a map
+// it actually READ, and `UpdateHarnessRequest.agent_prefixes` is a whole-map REPLACE whose `{}` is
+// the explicit clear. So a mapper that fabricated `{}` for a document that stated nothing would
+// send a destructive save on the next edit — which is the fact these rows pin.
+describe('descriptor preset bands', () => {
+    const definition = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+        name: 'seeded',
+        title: 'Seeded',
+        description: 'A harness that seeds preset history.',
+        requires_endpoint: true,
+        entry: 'instruct',
+        ranks: { instruct: 'A', 'summarizer': 'B' },
+        agents: ['instruct', 'summarizer'],
+        tools: ['read'],
+        builtin: true,
+        definition_revision: 3,
+        ...overrides
+    });
+
+    it('maps agent_prefixes onto agentPrefixes verbatim, in order, as a copy', async () => {
+        const module = await import('./api');
+        const row = definition({
+            agent_prefixes: {
+                // Two turns in a stated order, and untrimmed text: a band IS a history, so both
+                // the sequence and the bytes are the server's, not the client's to tidy.
+                instruct: [
+                    { role: 'user', content: ' What came before? ' },
+                    { role: 'assistant', content: 'A summary of the workshop.' }
+                ],
+                summarizer: [{ role: 'system', content: 'You have seen one meeting.' }]
+            },
+            agent_models: { instruct: 'gpt-5' }
+        });
+        const view = module.descriptorOf(row as never);
+
+        expect(view.agentPrefixes).toEqual({
+            instruct: [
+                { role: 'user', content: ' What came before? ' },
+                { role: 'assistant', content: 'A summary of the workshop.' }
+            ],
+            summarizer: [{ role: 'system', content: 'You have seen one meeting.' }]
+        });
+        // Order is part of the value, so it is pinned as an array, not as a set of keys.
+        expect(view.agentPrefixes?.instruct.map((turn) => turn.role)).toEqual(['user', 'assistant']);
+        // The sibling maps keep working beside the new field.
+        expect(view.agentModels).toEqual({ instruct: 'gpt-5' });
+
+        // A COPY at every depth: writing through the view (the dialog does exactly this while
+        // drafting) must not rewrite the response body another caller still holds.
+        (view.agentPrefixes?.instruct[0] as { content: string }).content = 'edited';
+
+        expect((row.agent_prefixes as Record<string, { content: string }[]>).instruct[0].content).toBe(
+            ' What came before? '
+        );
+    });
+
+    it('states no agentPrefixes key for a row that states no band map, and keeps an explicit empty map', async () => {
+        const module = await import('./api');
+
+        // The common case: a LIST card never carries the map, and inventing one here would tell the
+        // dialog "asked, seeds none" — a baseline it is then allowed to send back as a clear.
+        expect(Object.prototype.hasOwnProperty.call(module.descriptorOf(definition() as never), 'agentPrefixes')).toBe(
+            false
+        );
+
+        // `agent_prefixes: {}` IS information ("this definition states every member starts with the
+        // instruction alone"), so it survives as an empty own map.
+        const cleared = module.descriptorOf(definition({ agent_prefixes: {} }) as never);
+
+        expect(Object.prototype.hasOwnProperty.call(cleared, 'agentPrefixes')).toBe(true);
+        expect(cleared.agentPrefixes).toEqual({});
+
+        // A keyed `[]` is the same stated decision one member down, and it keeps its key.
+        expect(module.descriptorOf(definition({ agent_prefixes: { instruct: [] } }) as never).agentPrefixes).toEqual({
+            instruct: []
+        });
+
+        // Anything that is not an object map is NOT a band map: `null`, an array, and a scalar all
+        // answer the capability question with "not stated", which keeps the next save from sending
+        // `{}` against bands this browser never saw.
+        for (const value of [null, [], 'nope', 7]) {
+            const view = module.descriptorOf(definition({ agent_prefixes: value }) as never);
+
+            expect(Object.prototype.hasOwnProperty.call(view, 'agentPrefixes')).toBe(false);
+        }
+    });
+
+    it('drops a turn outside the closed band shape and keeps the rest of the history', async () => {
+        const module = await import('./api');
+        // A `tool` turn answers an assistant `tool_calls` block a band never carries
+        // (../types/index.ts:703-717), so it cannot round-trip through the PATCH body this map feeds.
+        const view = module.descriptorOf(
+            definition({
+                agent_prefixes: {
+                    instruct: [
+                        { role: 'tool', content: 'orphan result' },
+                        { role: 'user', content: 'kept' },
+                        { role: 'assistant', content: 42 },
+                        'not a turn at all'
+                    ],
+                    summarizer: [{ role: 'assistant', content: 'kept too', extra: 'ignored' }]
+                }
+            }) as never
+        );
+
+        expect(view.agentPrefixes).toEqual({
+            instruct: [{ role: 'user', content: 'kept' }],
+            summarizer: [{ role: 'assistant', content: 'kept too' }]
+        });
+    });
+
+    it('reads one session agent band on its own route and hands the response back unchanged', async () => {
+        serve(
+            {
+                'GET /v1/harness/sessions/s9/agents/editor/prefix': {
+                    session_id: 's9',
+                    agent_id: 'editor',
+                    prefix: [{ role: 'user', content: 'A seeded question.' }],
+                    source: 'session'
+                }
+            },
+            { 'GET /v1/harness/sessions/s9/agents/editor/prefix': 200 }
+        );
+
+        const module = await import('./api');
+
+        expect(await module.getSessionAgentPrefix('s9', 'editor')).toEqual({
+            session_id: 's9',
+            agent_id: 'editor',
+            prefix: [{ role: 'user', content: 'A seeded question.' }],
+            source: 'session'
+        });
+        // THE route, spelled by the contract: this is the only read that states what THIS conversation
+        // seeds, so a client that guessed a definition read instead would show the template's band.
+        expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+            'GET /v1/harness/sessions/s9/agents/editor/prefix'
+        ]);
+        expect(HARNESS_ROUTES.sessionsBySessionIdAgentsByAgentIdPrefix('s9', 'editor')).toBe(
+            '/v1/harness/sessions/s9/agents/editor/prefix'
+        );
+    });
+
+    it('encodes a member name that is user data, and lets a 404 reject the band read', async () => {
+        serve(
+            {
+                'GET /v1/harness/sessions/s%209/agents/note%2Ftaker/prefix': {
+                    session_id: 's 9',
+                    agent_id: 'note/taker',
+                    prefix: [],
+                    source: 'none'
+                }
+            },
+            { 'GET /v1/harness/sessions/s9/agents/gone/prefix': 404 }
+        );
+
+        const module = await import('./api');
+
+        expect(await module.getSessionAgentPrefix('s 9', 'note/taker')).toEqual({
+            session_id: 's 9',
+            agent_id: 'note/taker',
+            prefix: [],
+            source: 'none'
+        });
+
+        // A member that left the roster 404s, and the caller (./main.ts `loadSessionConfiguration`)
+        // skips that member rather than inventing an empty band for it.
+        serve({}, { 'GET /v1/harness/sessions/s9/agents/gone/prefix': 404 });
+        await expect(module.getSessionAgentPrefix('s9', 'gone')).rejects.toThrow();
+    });
+});

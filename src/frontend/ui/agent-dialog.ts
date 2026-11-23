@@ -9,8 +9,14 @@
 // edge. Every chip's model select is live, so a model can be changed without viewing
 // that agent first. Selecting a tab shows the rest of THAT agent's configuration: ONE
 // editable instruction box holding the FULL effective instruction (R4: no read-only
-// "preset" block and no revert control — the box is the whole truth). Nothing else is
-// listed: an agent the team does not select has no configuration here yet, so it gets
+// "preset instruction" block and no revert control — the box is the whole truth), and —
+// only when the host supplies `options.prefixes` — one EDITABLE list of the agent's PRESET
+// TURNS under it. That list is the underload agent's `prefix`: the ordered system/user/
+// assistant history a NEW conversation is seeded with after the instruction. It is not a
+// second copy of the instruction and it has no revert control either; R4's deleted block
+// stays deleted, and a host that passes no `prefixes` renders no such section at all.
+// Nothing else is listed: an agent the team does not select has no configuration here yet,
+// so it gets
 // its own tab through the header `[+]` control instead — and in a session
 // (`allowCustom`) the reader can also type a brand-new agent name (R7) and get a tab
 // the same way.
@@ -42,12 +48,14 @@
 //     then saving writes all three at once;
 //   - dismissal drops them (the next open starts from the server's truth).
 //
-// The baseline maps (`options.models.models`, `options.instructions`) are the
-// server's answer, so an editor always opens on the TRUTH, and the diff against it
+// The baseline maps (`options.models.models`, `options.instructions`, `options.prefixes`)
+// are the server's answer, so an editor always opens on the TRUTH, and the diff against it
 // is what `changesOf()` reports to `onApply`. An explicit '' in a draft means "clear
 // it" (use the resolved default model / drop the stored instruction so the agent runs
 // its default instruction again), which is how a saved value is reverted — by the
-// box's own text, not by a dedicated control.
+// box's own text, not by a dedicated control. An explicit `[]` in a draft's preset list
+// is the same fact for the seeded history: the agent starts a new conversation with its
+// instruction alone.
 //
 // The DEFAULT text a baseline falls back to is the FULL composed prompt
 // (./agents.ts `agentDefaultInstructionOf`), whose identity sentence comes from the
@@ -84,9 +92,10 @@
 // HONEST RESTRICTIONS
 // -------------------
 // `editable` is the TEAM lock (an in-flight run, a session being created). It gates
-// `[+]`, the rank badges, `Set as entry`, `Remove from team` and the instruction
-// editor. Models keep their own flag inside `models` (a saved session edits its live
-// model map), so the dialog offers model editing exactly where the server does.
+// `[+]`, the rank badges, `Set as entry`, `Remove from team`, the instruction editor and
+// the preset-turn editor. Models keep their own flag inside `models` (a saved session
+// edits its live model map), so the dialog offers model editing exactly where the server
+// does.
 //
 // `scope` says WHERE a save lands — 'session' edits this conversation's own agents and
 // instructions, 'harness' edits the template new sessions start from (R5). It changes
@@ -114,9 +123,10 @@
 // ----------------------------------
 // `update(next)` rebuilds the body in place and restores focus to the SAME logical
 // control (tab, `[+]`, add option, instruction textarea including its caret, model
-// select, action button). Activity frames go through `paintActivity()` instead, which
-// only touches the tabs' ring attributes — it never rebuilds, so typing is never
-// interrupted mid-frame.
+// select, action button, and the preset-turn editor's role select, content textarea
+// (caret included) and row controls — each addressed by agent id + row index). Activity
+// frames go through `paintActivity()` instead, which only touches the tabs' ring
+// attributes — it never rebuilds, so typing is never interrupted mid-frame.
 //
 // The modal itself is ui/dialog.ts: Escape/backdrop/close-button, focus trapping and
 // focus restoration live there. `onClose` lets main.ts forget its handle.
@@ -135,7 +145,9 @@
 //   - src/frontend/ui/agent-dialog.css `.agent-dialog*`
 
 import type { AgentRank } from '../../types';
-import type { AgentDescriptor } from '../../server/protocol';
+// `HarnessMessage` comes from the wire mirror (./server/protocol re-exports ../types), so
+// the preset-turn type below is the SAME union the server sends — never a restated copy.
+import type { AgentDescriptor, HarnessMessage } from '../../server/protocol';
 // One source for rank wording, validation and stepping (R20) — see contract.ts.
 import { AGENT_RANKS, isAgentRank, rankLabelOf } from '../contract';
 import {
@@ -149,6 +161,20 @@ import { paintActivity as paintAgentActivity } from './activity';
 import { paintAgentColor } from './agent-color';
 import { openDialog } from './dialog';
 import type { DialogHandle } from './dialog';
+
+// ONE PRESET TURN — the underload agent's `prefix` field: the seeded HISTORY a NEW
+// conversation starts with, injected after every instruction system message and before the
+// ordinary conversation (packages/underload/harness/src/engine/core/agent.ts `seed`, and the
+// field's own contract at packages/underload/harness/src/engine/types/index.ts:711-735).
+//
+// It is the NON-TOOL slice of the transcript union, taken from the mirrored wire type with
+// `Extract` rather than restated by hand, so every optional field those turns carry
+// (`attachments`, `reasoning`, `included`, `reasoningIncluded`, `messageId`) stays exactly as
+// the server describes it and the dialog can round-trip a turn it never renders. A `tool`
+// result is excluded because it answers an assistant `tool_calls` block `prefix` never
+// carries — the library type refuses it, and the role select below offers exactly the three
+// roles that type admits.
+export type AgentDialogPrefixTurn = Extract<HarnessMessage, { role: 'system' | 'user' | 'assistant' }>;
 
 // What ONE explicit apply sends to main.ts. Everything is a DELTA plus the entry-agent
 // change and the rank assignments it represents; main.ts is the only module that knows
@@ -181,6 +207,14 @@ export type AgentConfigurationApply = {
     // anyone, and an agent becoming the entry agent is never in `remove`.
     add: string[];
     remove: string[];
+    // PRESET TURNS (the underload agent `prefix`): the agent id → the COMPLETE ordered
+    // list it should seed after its instructions, for every agent whose list the reader
+    // touched. It is a whole-list replacement, never a per-row patch, and an explicit []
+    // means "clear it" (a new conversation starts with the instruction alone).
+    // OPTIONAL BY CONTRACT: the key is present only when at least one ROSTERED agent has a
+    // touched list, so a configuration save with no prefix edit — and every host that never
+    // passed `options.prefixes` — keeps the exact pre-prefix payload.
+    prefixes?: Record<string, AgentDialogPrefixTurn[]>;
 };
 
 // How main.ts reports the write back. `applied: false` keeps the dialog open with
@@ -210,6 +244,16 @@ export type AgentDialogOptions = {
     // composes, identity sentence plus guidelines (./agents.ts
     // `agentDefaultInstructionOf`).
     instructions: Readonly<Record<string, string>>;
+    // The stored per-agent PRESET TURNS (the underload agent `prefix`): the ordered
+    // system/user/assistant history each agent seeds after its instruction. PRESENCE IS
+    // THE CAPABILITY FLAG — a host that passes this map (even an empty one) gets the
+    // editable `Preset turns` editor under the instruction for every rostered agent; a
+    // host that omits it renders no prefix UI at all, edits nothing, and keeps the old
+    // apply payload byte-for-byte, which is why no existing caller or fixture changes.
+    // A member absent from the map honestly has NO preset turns (an empty editor with an
+    // Add control), never an unknown one. The dialog never mutates these arrays or their
+    // entries: the first edit clones the list.
+    prefixes?: Readonly<Record<string, readonly AgentDialogPrefixTurn[]>>;
     // R5: WHERE a save lands, which decides only the copy the reader is shown.
     // 'session' edits this conversation's own agents and instructions; 'harness' (the
     // default, so every existing caller keeps its old wording) edits the template.
@@ -277,6 +321,11 @@ type AgentDraft = {
     // Instruction text exactly as typed, or '' for "no stored instruction", which lets
     // the agent fall back to the default instruction its library row describes.
     instruction?: string;
+    // PRESET TURNS, in the order the reader left them. ABSENT means untouched (follow the
+    // server's `options.prefixes` on every paint); present means "this exact ordered list",
+    // including `[]` = the reader cleared every turn. The array and its entries are always
+    // THIS dialog's own clones, so an edit can never write through to `options`.
+    prefix?: AgentDialogPrefixTurn[];
     // Explicit membership: true adds the agent, false removes it.
     member?: boolean;
     // R20: the RANK the reader assigned to THIS member. Independent of every other
@@ -436,6 +485,147 @@ const baselineInstructionOf = (options: AgentDialogOptions, name: string): strin
         : agentDefaultInstructionOf(agentDetailsOf(options.agents, name));
 };
 
+// ---------------------------------------------------------------------------
+// PRESET TURNS — the ordered `prefix` history a NEW conversation seeds after the
+// instruction block (underload `AgentConfiguration.prefix`). The editor lives under the
+// instruction and behaves EXACTLY like the instruction editor: a local draft, verbatim
+// text, the server's answer only while nothing was touched.
+// ---------------------------------------------------------------------------
+
+// Is prefix editing offered at all? PRESENCE of the map is the whole test: a host without
+// the route renders no prefix UI and can never produce a `prefixes` delta, which is what
+// keeps the pre-prefix dialog and its fixtures byte-compatible.
+const editsPrefixTurns = (options: AgentDialogOptions): boolean => options.prefixes !== undefined;
+
+// The roles the select offers — exactly the ones the library type admits, in the order a
+// reader reaches for them. A `tool` turn is never offered: it answers an assistant
+// `tool_calls` block `prefix` cannot carry (see `AgentDialogPrefixTurn`).
+const PREFIX_TURN_ROLES: readonly AgentDialogPrefixTurn['role'][] = ['system', 'user', 'assistant'];
+
+// The role a `<select>` produced, or `undefined` for anything outside that contract, so a
+// stray value (an injected option, a future role) can never reach the wire through here.
+const prefixRoleOf = (value: string): AgentDialogPrefixTurn['role'] | undefined =>
+    (PREFIX_TURN_ROLES as readonly string[]).includes(value)
+        ? (value as AgentDialogPrefixTurn['role'])
+        : undefined;
+
+// A detached copy of a preset list: a NEW array of NEW entries. Everything that can be
+// edited goes through this, so no edit ever writes through to `options.prefixes` (the
+// server's answer) and a live `update()` cannot reshape a list mid-keystroke.
+const clonePrefixTurns = (turns: readonly AgentDialogPrefixTurn[]): AgentDialogPrefixTurn[] =>
+    turns.map((turn) => ({ ...turn }));
+
+// The list ONE agent's editor shows: the reader's draft while it exists, otherwise the
+// baseline. A member the map omits honestly has NO turns (an empty editor with an Add
+// control), which is the same "no stored value" fact an empty instruction box states.
+const shownPrefixTurnsOf = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string
+): readonly AgentDialogPrefixTurn[] =>
+    state.drafts.get(name)?.prefix ?? options.prefixes?.[name] ?? [];
+
+// The one writer for the preset editor: materialise a private clone on the FIRST edit,
+// let `edit` reshape it, and store it as the draft. `editDraft` also clears the last apply
+// verdict, so a stale "Saved." line never describes new work.
+const editPrefixTurns = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    edit: (turns: AgentDialogPrefixTurn[]) => void
+): void => {
+    editDraft(state, name, (draft) => {
+        const turns = draft.prefix ?? clonePrefixTurns(options.prefixes?.[name] ?? []);
+        edit(turns);
+        draft.prefix = turns;
+    });
+};
+
+// A row index the reader pressed, or a live refresh that shortened the list between the
+// paint and the event, can land on a missing entry. Every mutator below says so by writing
+// NOTHING rather than inventing a turn.
+const setPrefixTurnRole = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    index: number,
+    role: AgentDialogPrefixTurn['role']
+): void => {
+    editPrefixTurns(options, state, name, (turns) => {
+        const turn = turns[index];
+        if (turn === undefined) return;
+
+        // SPREAD, then change the role and nothing else: `attachments`, `reasoning`,
+        // `included` and `messageId` are fields this editor never shows, and replacing the
+        // entry with a rebuilt object would silently discard them.
+        turns[index] = { ...turn, role };
+    });
+};
+
+const setPrefixTurnContent = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    index: number,
+    content: string
+): void => {
+    editPrefixTurns(options, state, name, (turns) => {
+        const turn = turns[index];
+        if (turn === undefined) return;
+
+        // Verbatim, never trimmed — the same rule the instruction box follows, so a save
+        // round-trips byte-identical.
+        turns[index] = { ...turn, content };
+    });
+};
+
+// Reorder: move one entry to a new position and keep every other entry's order and fields.
+// The bounds check is the press that arrives after a repaint already moved the row.
+const movePrefixTurn = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    index: number,
+    delta: number
+): boolean => {
+    const target = index + delta;
+    const turns = shownPrefixTurnsOf(options, state, name);
+
+    if (target < 0 || target >= turns.length) return false;
+
+    editPrefixTurns(options, state, name, (list) => {
+        const [moved] = list.splice(index, 1);
+        if (moved === undefined) return;
+        list.splice(target, 0, moved);
+    });
+
+    return true;
+};
+
+// Remove one entry. Removing the LAST one leaves `[]`, which the delta reports as an
+// explicit clear — the preset equivalent of clearing the instruction box by hand.
+const removePrefixTurn = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    index: number
+): void => {
+    editPrefixTurns(options, state, name, (turns) => {
+        turns.splice(index, 1);
+    });
+};
+
+// Add one entry at the END: the order is the seeded order, so a new turn joins the newest
+// memory, never the oldest. The new turn is exactly `{ role: 'user', content: '' }` — an
+// empty box the reader fills in, with no invented metadata.
+const addPrefixTurn = (options: AgentDialogOptions, state: DialogState, name: string): number => {
+    editPrefixTurns(options, state, name, (turns) => {
+        turns.push({ role: 'user', content: '' });
+    });
+
+    return (state.drafts.get(name)?.prefix ?? []).length - 1;
+};
+
 // The rank THIS dialog shows for one member (R20): the reader's drafted assignment
 // wins while it exists, otherwise the rank the server reports. `undefined` means no
 // rank is stated anywhere, and the UI says "rank not stated" rather than inventing one.
@@ -504,18 +694,22 @@ const changesPending = (options: AgentDialogOptions, state: DialogState): boolea
     return (
         Object.keys(changes.models).length > 0 ||
         Object.keys(changes.instructions).length > 0 ||
+        // A prefix-only edit counts: the key exists exactly when a rostered agent has a
+        // touched list, so the action can never read "Nothing to save" over preset edits.
+        changes.prefixes !== undefined ||
         changes.add.length > 0 ||
         changes.remove.length > 0
     );
 };
 
 // Build the request the action represents: only the deltas the reader made. A drafted
-// removal carries no model/instruction/rank delta (the server validates map keys against
-// the FINAL member set, so a leaving agent's edit would be a 400), and an agent armed as
-// the next entry agent is never listed as removed.
+// removal carries no model/instruction/preset/rank delta (the server validates map keys
+// against the FINAL member set, so a leaving agent's edit would be a 400), and an agent
+// armed as the next entry agent is never listed as removed.
 const changesOf = (options: AgentDialogOptions, state: DialogState): AgentConfigurationApply => {
     const models: Record<string, string> = {};
     const instructions: Record<string, string> = {};
+    const prefixes: Record<string, AgentDialogPrefixTurn[]> = {};
     const add: string[] = [];
     const remove: string[] = [];
 
@@ -526,6 +720,10 @@ const changesOf = (options: AgentDialogOptions, state: DialogState): AgentConfig
         if (onRoster(options, state, name)) {
             if (draft.model !== undefined) models[name] = draft.model;
             if (draft.instruction !== undefined) instructions[name] = draft.instruction;
+            // The preset list is the WHOLE ordered replacement the reader left behind
+            // (never a per-row patch), copied out so main.ts can merge or mutate it without
+            // reaching back into a draft the dialog still shows after a refused save.
+            if (draft.prefix !== undefined) prefixes[name] = clonePrefixTurns(draft.prefix);
         }
 
         if (draft.member === true && !options.members.includes(name)) add.push(name);
@@ -554,6 +752,12 @@ const changesOf = (options: AgentDialogOptions, state: DialogState): AgentConfig
     // save never restates ranks the reader never touched.
     const ranks = rankDeltasOf(options, state);
     if (Object.keys(ranks).length > 0) changes.ranks = ranks;
+
+    // Same rule for the preset lists: the key exists ONLY when at least one rostered agent
+    // has a touched list. An untouched agent keeps what the server has, an agent whose list
+    // was emptied sends `[]` (an explicit clear), and a host that never offered prefix
+    // editing keeps the exact pre-prefix payload.
+    if (Object.keys(prefixes).length > 0) changes.prefixes = prefixes;
 
     return changes;
 };
@@ -1076,6 +1280,299 @@ const createMembershipActions = (
     return row;
 };
 
+// ---------------------------------------------------------------------------
+// THE PRESET TURNS EDITOR — the ordered `prefix` history a NEW conversation seeds after
+// the instruction block, listed one row per turn in the exact seeded order.
+//
+// This is NOT the read-only "preset instruction" block R4 deleted, and it revives nothing
+// of it: nothing here is a second copy of the instruction text, and there is no revert
+// control. Each row edits ONE turn the agent is seeded WITH (role + verbatim content), and
+// the action replaces the WHOLE list of an agent it touched. The section exists only when
+// the host supplied `options.prefixes`, so a host without the route sees the old dialog.
+//
+// A band is a SEED with more than one life, and the copy below says which one an edit moves:
+// on a harness TEMPLATE it is the history NEW sessions start with, while in a SAVED
+// CONVERSATION the accepted write also replaces the band this conversation's own NEXT turn
+// runs (`prefixEditorTitleOf` states the full rule, with the engine cross-references).
+// ---------------------------------------------------------------------------
+
+// The lock wording mirrors the instruction editor's exactly: the reason lives ON the
+// control (R3: no explanation paragraph), and the unlocked sentence names where a save
+// lands, because `scope` decides that (R5).
+//
+// F3 — WHAT AN ACCEPTED BAND WRITE ACTUALLY DOES, per scope, in the reader's words. The
+// template sentence below is the one the copy used to state for BOTH scopes, and for a saved
+// conversation it understated the write:
+//   - A HARNESS TEMPLATE (`scope: 'harness'`): the band is the factory the NEXT session seeds
+//     from (`../api.ts updateHarness` → the registry's preset copy → `agent({ prefix })`), and
+//     nothing already running moves — "a new conversation" is the honest sentence.
+//   - A SAVED CONVERSATION (`scope: 'session'`): the accepted write goes through
+//     `../api.ts updateSessionAgent` → `../server/sessions.ts setSessionAgentPrefix` →
+//     the engine's `setAgentPrefix` → `core/agent.ts writePrefix`, which moves THREE things at
+//     once — this agent's LIVE transcript band, so its DEFAULT conversation runs the new history
+//     on its NEXT turn; the `reset()` baseline; and the band a NEW host thread seeds. What it
+//     does NOT rewrite is a separate host thread that already exists: each one keeps the
+//     transcript it was created with, the same limitation an instruction edit states.
+// The sentences stay on the controls (R3) and stay one line each.
+const prefixEditorTitleOf = (options: AgentDialogOptions, locked: boolean): string =>
+    locked
+        ? 'Wait for the current run to finish before changing these preset turns.'
+        : isSessionScope(options)
+          ? 'A preset turn this agent runs behind in this conversation, from its next turn · a separate conversation it already has keeps its own history.'
+          : 'A preset turn this agent starts a new conversation with. Saved on this harness template for new sessions.';
+
+// The visible note under the section label: the SAME two facts as the tooltip above, in the
+// shortest form that is still true per scope, because an empty history and a seeded one get the
+// same sentence and the reader has to learn from it WHERE their edit lands.
+const prefixSectionNoteOf = (options: AgentDialogOptions): string =>
+    isSessionScope(options)
+        ? 'Turns this agent already has behind it. This conversation is seeded with them from its next turn, and every new or reset conversation of this agent starts from them.'
+        : 'Turns this agent already has behind it. A new conversation is seeded with them after its instruction, in this order.';
+
+// The empty state, stated with the same scope rule: clearing the last band is a real change to
+// what runs NEXT, not only to whatever the reader opens afterwards.
+const prefixEmptyNoteOf = (options: AgentDialogOptions): string =>
+    isSessionScope(options)
+        ? 'No preset turns · this conversation starts with the instruction alone from its next turn.'
+        : 'No preset turns · a new conversation starts with the instruction alone.';
+
+// Removing the LAST turn is the preset editor's version of clearing the instruction box, so the
+// control says what that means — per scope, for the same reason as the two sentences above.
+const prefixClearTitleOf = (options: AgentDialogOptions): string =>
+    isSessionScope(options)
+        ? 'Remove this preset turn, so this conversation starts with its instruction alone from its next turn.'
+        : 'Remove this preset turn, so a new conversation starts with its instruction alone.';
+
+// The reason a locked control states — the SAME `hint` main.ts supplies that `[+]`,
+// `Set as entry` and `Remove from team` carry. Never invented.
+const prefixLockReasonOf = (options: AgentDialogOptions): string =>
+    options.hint ?? 'The agent team is locked here.';
+
+// Where focus goes after a repaint that changed the list: the CONTENT box of the row the
+// reader was working on, which stays enabled wherever the rows moved (a row's own arrow
+// button can become disabled by the move). `-1` means the list is empty, and then the Add
+// control is the only thing worth holding onto.
+const prefixRowFocusOf = (name: string, index: number): string =>
+    index < 0 ? `prefix:add:${name}` : `prefix:content:${name}:${index}:0`;
+
+// One row: the role, the verbatim content, and the three controls that reshape the list.
+// `data-agent`/`data-index` on every control is what lets the focus layer hand focus back
+// to the SAME row after a rebuild (the key carries the agent id and the row's position).
+const createPrefixTurnRow = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    label: string,
+    turn: AgentDialogPrefixTurn,
+    index: number,
+    count: number
+): HTMLElement => {
+    const locked = !options.editable;
+
+    const row = el('div', 'agent-dialog-prefix-row');
+    // The order IS the product contract, so a test/inspector can read the seeded order —
+    // and a role the dialog did not offer — straight off the DOM.
+    row.dataset.agent = name;
+    row.dataset.index = String(index);
+    row.dataset.role = turn.role;
+
+    const role = el('select', 'agent-dialog-prefix-role field-input field-select');
+    role.setAttribute('aria-label', `Role for preset turn ${index + 1} for ${label}`);
+    role.dataset.agent = name;
+    role.dataset.index = String(index);
+    role.title = prefixEditorTitleOf(options, locked);
+    role.disabled = locked;
+    // THREE options, in the order a reader reaches for them, and no fourth: a `tool` turn
+    // answers a `tool_calls` block this field never carries.
+    for (const value of PREFIX_TURN_ROLES) {
+        const choice = el('option', undefined, value);
+        choice.value = value;
+        role.append(choice);
+    }
+    role.value = turn.role;
+
+    // A role change writes the draft and re-arms the action WITHOUT a repaint: the select
+    // is the only thing it changes, and a rebuild would move the caret out of a content box
+    // the reader may be typing in — the same reason instruction typing never repaints. The
+    // row's own `data-role` is updated in place, because the machine fact the DOM exposes
+    // must never disagree with the select the reader just changed.
+    role.addEventListener('change', () => {
+        const next = prefixRoleOf(role.value);
+        if (next === undefined) return;
+
+        row.dataset.role = next;
+        setPrefixTurnRole(options, state, name, index, next);
+        syncAction(options, state);
+    });
+
+    const content = el('textarea', 'agent-dialog-prefix-content field-input');
+    content.setAttribute('aria-label', `Content for preset turn ${index + 1} for ${label}`);
+    content.dataset.agent = name;
+    content.dataset.index = String(index);
+    content.rows = 3;
+    content.spellcheck = false;
+    content.placeholder = 'Describe a turn this agent already has behind it.';
+    // VERBATIM, never trimmed: the box holds the text the agent is seeded with.
+    content.value = turn.content;
+    content.title = prefixEditorTitleOf(options, locked);
+    content.disabled = locked;
+
+    content.addEventListener('input', () => {
+        setPrefixTurnContent(options, state, name, index, content.value);
+        syncAction(options, state);
+    });
+
+    const tools = el('div', 'agent-dialog-prefix-tools');
+    tools.append(
+        createPrefixTurnAction(options, state, name, label, index, count, 'up'),
+        createPrefixTurnAction(options, state, name, label, index, count, 'down'),
+        createPrefixTurnAction(options, state, name, label, index, count, 'remove')
+    );
+
+    row.append(role, content, tools);
+
+    return row;
+};
+
+// The row-creating press. Like `[+]` for the team, it is a LOCAL draft until the action:
+// it appends one empty `user` turn at the END of the list (a new turn is the newest memory,
+// and the reader types it in immediately), moves the view to that row and sends nothing.
+const createPrefixAddControl = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    label: string
+): HTMLButtonElement => {
+    const locked = !options.editable;
+
+    const add = el('button', 'agent-dialog-prefix-add');
+    add.type = 'button';
+    add.dataset.agent = name;
+    add.textContent = '+ Add turn';
+    add.setAttribute('aria-label', `Add a preset turn for ${label}`);
+    add.disabled = locked;
+    add.title = locked
+        ? prefixLockReasonOf(options)
+        : 'Add an empty preset turn at the end of this history. Saved with the rest when you save.';
+
+    add.addEventListener('click', () => {
+        if (add.disabled) return;
+
+        const at = addPrefixTurn(options, state, name);
+        state.paint(prefixRowFocusOf(name, Math.max(at, 0)));
+    });
+
+    return add;
+};
+
+// The whole section, under the instruction: one row per seeded turn, in the order the agent
+// is seeded with them, then the Add control. Presence of the section is decided by the
+// caller (the host supplied `options.prefixes`), never by the list being empty — an empty
+// history is a fact the reader can change, so the section shows its state AND its affordance.
+const createPrefixTurnsSection = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    label: string
+): HTMLElement => {
+    const turns = shownPrefixTurnsOf(options, state, name);
+
+    const group = el('div', 'agent-dialog-prefixes');
+    group.dataset.agent = name;
+    // `data-count` is the machine-readable length of the list the reader is editing, so a
+    // test pins an add/remove/clear without walking the rows.
+    group.dataset.count = String(turns.length);
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', `Preset turns for ${label}`);
+
+    group.append(el('p', 'agent-dialog-label', 'Preset turns'));
+    // F3: the sentence is scope-aware, because "a new conversation" is only true of a template
+    // write — a conversation's own band is what ITS next turn runs (see `prefixSectionNoteOf`).
+    group.append(
+        el('p', 'agent-dialog-field-note agent-dialog-prefix-note', prefixSectionNoteOf(options))
+    );
+
+    if (turns.length === 0) {
+        group.append(el('p', 'agent-dialog-prefix-empty', prefixEmptyNoteOf(options)));
+    }
+
+    turns.forEach((turn, index) => {
+        group.append(createPrefixTurnRow(options, state, name, label, turn, index, turns.length));
+    });
+
+    group.append(createPrefixAddControl(options, state, name, label));
+
+    return group;
+};
+
+// The three per-row controls. They deliberately do NOT carry `.agent-dialog-action`: that
+// class is the focus layer's key for the MEMBERSHIP pair, whose key is `action:<action>`
+// alone. A preset row needs its INDEX as well, so it has its own class and its own
+// `prefix:` keys, and neither key can be mistaken for the other.
+const createPrefixTurnAction = (
+    options: AgentDialogOptions,
+    state: DialogState,
+    name: string,
+    label: string,
+    index: number,
+    count: number,
+    action: 'up' | 'down' | 'remove'
+): HTMLButtonElement => {
+    const locked = !options.editable;
+    // The ends of the list have nowhere to go, and saying so beats a press that does
+    // nothing (a disabled control that names its reason is this dialog's convention).
+    const atBoundary = (action === 'up' && index === 0) || (action === 'down' && index === count - 1);
+
+    const button = el('button', `agent-dialog-prefix-action agent-dialog-prefix-${action}`);
+    button.type = 'button';
+    button.dataset.action = action;
+    button.dataset.agent = name;
+    button.dataset.index = String(index);
+    button.textContent = action === 'up' ? '↑' : action === 'down' ? '↓' : '×';
+    button.setAttribute(
+        'aria-label',
+        action === 'remove'
+            ? `Remove preset turn ${index + 1} from ${label}`
+            : `Move preset turn ${index + 1} of ${label} ${action === 'up' ? 'earlier' : 'later'}`
+    );
+    button.disabled = locked || atBoundary;
+    button.title = locked
+        ? prefixLockReasonOf(options)
+        : atBoundary
+          ? action === 'up'
+            ? 'This is the first preset turn: it is seeded straight after the instruction.'
+            : 'This is the last preset turn: it is the newest memory a new conversation starts with.'
+          : action === 'remove'
+            ? count === 1
+              ? // The last turn of the list: removing it clears the whole preset history,
+                // and the delta reports that as an explicit []. F3: the sentence names the
+                // scope the clear lands on, so a conversation's reader is not told the
+                // current chat keeps running the old band.
+                prefixClearTitleOf(options)
+              : 'Remove this preset turn when you save.'
+            : `Move this preset turn one place ${action === 'up' ? 'earlier' : 'later'} in the order a new conversation is seeded with.`;
+
+    button.addEventListener('click', () => {
+        if (button.disabled) return;
+
+        if (action === 'remove') {
+            removePrefixTurn(options, state, name, index);
+
+            const left = shownPrefixTurnsOf(options, state, name).length;
+            state.paint(prefixRowFocusOf(name, left === 0 ? -1 : Math.min(index, left - 1)));
+            return;
+        }
+
+        const delta = action === 'up' ? -1 : 1;
+        if (!movePrefixTurn(options, state, name, index, delta)) return;
+
+        // Focus follows the row the reader moved, not the position it came from.
+        state.paint(prefixRowFocusOf(name, index + delta));
+    });
+
+    return button;
+};
+
 // The full body, built off-document so the module stays testable without the app
 // shell. `state` is the local draft layer: a paint reads it and never writes the
 // server.
@@ -1343,6 +1840,15 @@ const buildContent = (options: AgentDialogOptions, state: DialogState): HTMLElem
 
     config.append(instruction);
 
+    // Preset turns (the underload agent `prefix`) ----------------------------
+    // The section sits DIRECTLY under the instruction, because that is where the seeded
+    // order continues: instruction, then these turns, then the conversation. Presence of
+    // the map is the only capability test — a host without the route renders nothing here,
+    // which is what keeps the old dialog byte-identical.
+    if (editsPrefixTurns(options)) {
+        config.append(createPrefixTurnsSection(options, state, selected, label));
+    }
+
     // Membership ------------------------------------------------------------
     // R3: no checkbox and no prose. `[+]` adds, this row removes.
     //
@@ -1514,6 +2020,32 @@ const focusKeyOf = (root: HTMLElement): string | undefined => {
     // only has to land the caret back inside that field (no per-character state).
     if (active.closest<HTMLElement>('.agent-dialog-add-input') !== null) return 'add-input';
 
+    // The preset-turn editor (the agent `prefix`). Rows have no stable node and no
+    // aria-label identity worth keying on — the ROW POSITION is the identity — so every key
+    // here carries the agent id AND the index (see `prefixTargetOf`).
+    const prefixAdd = active.closest<HTMLElement>('.agent-dialog-prefix-add');
+    if (prefixAdd !== null) return `prefix:add:${prefixAdd.dataset.agent ?? ''}`;
+
+    const prefixRole = active.closest<HTMLSelectElement>('.agent-dialog-prefix-role');
+    if (prefixRole !== null) {
+        return `prefix:role:${prefixRole.dataset.agent ?? ''}:${prefixRole.dataset.index ?? ''}`;
+    }
+
+    const prefixContent = active.closest<HTMLTextAreaElement>('.agent-dialog-prefix-content');
+    if (prefixContent !== null) {
+        // The caret is part of the box, exactly as it is for the instruction editor.
+        return `prefix:content:${prefixContent.dataset.agent ?? ''}:${prefixContent.dataset.index ?? ''}:${
+            prefixContent.selectionStart ?? 0
+        }`;
+    }
+
+    const prefixAction = active.closest<HTMLElement>('.agent-dialog-prefix-action');
+    if (prefixAction !== null) {
+        return `prefix:action:${prefixAction.dataset.action ?? ''}:${prefixAction.dataset.agent ?? ''}:${
+            prefixAction.dataset.index ?? ''
+        }`;
+    }
+
     const action = active.closest<HTMLElement>('.agent-dialog-action');
     if (action !== null) return `action:${action.dataset.action ?? ''}`;
 
@@ -1530,8 +2062,45 @@ const focusKeyOf = (root: HTMLElement): string | undefined => {
     if (apply !== null) return `apply:${apply.dataset.agent ?? ''}`;
 
     // R4: no `revert` and no read-only `preset` details any more — the instruction box
-    // above is the only instruction control, so those keys can never be produced.
+    // above is still the only INSTRUCTION control, so those keys can never be produced. The
+    // `prefix:` keys above belong to the editable preset-HISTORY editor, a different thing
+    // that has no revert control of its own (its list is edited row by row).
     return undefined;
+};
+
+// The preset editor's rows are addressed by AGENT + POSITION: a rebuild replaces every row
+// node, and the only stable description of one is where it sits in the seeded order. The
+// key layouts are `add:<agent>`, `role:<agent>:<index>`, `content:<agent>:<index>[:<caret>]`
+// and `action:<action>:<agent>:<index>`. Agent ids cannot contain a `:` (the server's
+// `^[a-z][a-z0-9_-]*$` name pattern, which the `[+]` name form validates too), so splitting
+// on `:` is unambiguous.
+const prefixTargetOf = (root: HTMLElement, rest: string): HTMLElement | null => {
+    const cut = rest.indexOf(':');
+    const kind = cut < 0 ? rest : rest.slice(0, cut);
+    const tail = cut < 0 ? '' : rest.slice(cut + 1);
+
+    if (kind === 'add') {
+        return root.querySelector<HTMLElement>(`.agent-dialog-prefix-add[data-agent="${tail}"]`);
+    }
+
+    if (kind === 'action') {
+        const [action = '', agent = '', index = ''] = tail.split(':');
+
+        return root.querySelector<HTMLElement>(
+            `.agent-dialog-prefix-action[data-action="${action}"][data-agent="${agent}"][data-index="${index}"]`
+        );
+    }
+
+    // `role` and `content` share the `<agent>:<index>` tail (a content key carries the
+    // caret after it, which `focusByKey` reads off the key itself).
+    const [agent = '', index = ''] = tail.split(':');
+    const selector = kind === 'role' ? '.agent-dialog-prefix-role' : '.agent-dialog-prefix-content';
+
+    return (
+        Array.from(root.querySelectorAll<HTMLElement>(selector)).find(
+            (element) => element.dataset.agent === agent && element.dataset.index === index
+        ) ?? null
+    );
 };
 
 // Find the equivalent control in the rebuilt body and focus it. A control that is
@@ -1553,6 +2122,10 @@ const targetOf = (root: HTMLElement, key: string): HTMLElement | null => {
     const separator = key.indexOf(':');
     const kind = key.slice(0, separator);
     const rest = key.slice(separator + 1);
+
+    // The preset editor has its own addressing (agent + row position), so it resolves in
+    // one helper instead of adding three more branches here.
+    if (kind === 'prefix') return prefixTargetOf(root, rest);
 
     if (kind === 'action') {
         return root.querySelector<HTMLElement>(`.agent-dialog-action[data-action="${rest}"]`);

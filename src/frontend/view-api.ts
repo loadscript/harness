@@ -1223,6 +1223,21 @@ export const frozenDescriptorOf = (definition: SessionDefinitionResource): Harne
         // explicit `agent_colors` map that stopped at the definition read would never reach
         // the composer, the dialog badges or the transcript tiles.
         ...(card.agentColors === undefined ? {} : { agentColors: { ...card.agentColors } }),
+        // U6: the per-agent PRESET-HISTORY bands ride the same mapper for the same reason. This
+        // descriptor IS the definition an archived conversation paints, and for the agent dialog
+        // it is also the only band map a saved conversation ever gets from its own record: the
+        // live band is read per member from `GET .../agents/{id}/prefix` (./api.ts
+        // `getSessionAgentPrefix`), and this frozen copy is the honest fallback for a member that
+        // read has not answered for. `descriptorOf` already projected every turn to the closed
+        // wire shape and copied every array, so this is a copy of a copy — the descriptor must not
+        // alias the definition resource the cache below hands out.
+        ...(card.agentPrefixes === undefined
+            ? {}
+            : {
+                  agentPrefixes: Object.fromEntries(
+                      Object.entries(card.agentPrefixes).map(([name, band]) => [name, [...band]])
+                  )
+              }),
         builtin: card.builtin,
         editable: true
     };

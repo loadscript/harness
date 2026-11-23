@@ -82,6 +82,7 @@ export const HARNESS_PATH_TEMPLATES = {
     sessionsBySessionIdAgents: '/v1/harness/sessions/{session_id}/agents',
     sessionsBySessionIdAgentsByAgentId: '/v1/harness/sessions/{session_id}/agents/{agent_id}',
     sessionsBySessionIdAgentsByAgentIdInstruction: '/v1/harness/sessions/{session_id}/agents/{agent_id}/instruction',
+    sessionsBySessionIdAgentsByAgentIdPrefix: '/v1/harness/sessions/{session_id}/agents/{agent_id}/prefix',
     sessionsBySessionIdTools: '/v1/harness/sessions/{session_id}/tools',
     sessionsBySessionIdToolsByToolId: '/v1/harness/sessions/{session_id}/tools/{tool_id}',
     sessionsBySessionIdToolsByToolIdSource: '/v1/harness/sessions/{session_id}/tools/{tool_id}/source',
@@ -167,6 +168,8 @@ export const HARNESS_ROUTES = {
     sessionsBySessionIdAgentsByAgentId: (sessionId: string, agentId: string) => `${HARNESS_API_ROOT}/sessions/${sessionId}/agents/${agentId}`,
     /** `/v1/harness/sessions/{session_id}/agents/{agent_id}/instruction` */
     sessionsBySessionIdAgentsByAgentIdInstruction: (sessionId: string, agentId: string) => `${HARNESS_API_ROOT}/sessions/${sessionId}/agents/${agentId}/instruction`,
+    /** `/v1/harness/sessions/{session_id}/agents/{agent_id}/prefix` */
+    sessionsBySessionIdAgentsByAgentIdPrefix: (sessionId: string, agentId: string) => `${HARNESS_API_ROOT}/sessions/${sessionId}/agents/${agentId}/prefix`,
     /** `/v1/harness/sessions/{session_id}/tools` */
     sessionsBySessionIdTools: (sessionId: string) => `${HARNESS_API_ROOT}/sessions/${sessionId}/tools`,
     /** `/v1/harness/sessions/{session_id}/tools/{tool_id}` */
@@ -246,6 +249,7 @@ export const HARNESS_SERVICE_CAPABILITIES = {
 // In-repo models the contract reuses verbatim instead of duplicating.
 import type {
     AgentRank as AgentRankModel,
+    HarnessPrefixTurn as HarnessPrefixTurnModel,
     ToolMediaDescriptor as ToolMediaDescriptorModel,
     HarnessErrorInfo as HarnessErrorInfoModel,
     HarnessUsage as HarnessUsageModel,
@@ -696,8 +700,15 @@ export interface HarnessInstructionSummaryEntry {
 }
 
 /**
+ * Verbatim alias of the in-repo model `HarnessPrefixTurn` from ../types; shape equivalence is probed in
+ * src/shared/harness-api.test.ts.
+ * Not a duplicate: the model stays the single definition of this shape.
+ */
+export type HarnessPrefixTurn = HarnessPrefixTurnModel;
+
+/**
  * The identified read of one definition: a card plus the per-agent model overrides, the per-agent display
- * colors, the resolved core-tool set, and the instruction summary.
+ * colors, the per-agent preset-history bands, the resolved core-tool set, and the instruction summary.
  */
 export type HarnessDefinition = HarnessCard
     & {
@@ -724,6 +735,25 @@ export type HarnessDefinition = HarnessCard
      */
     agent_colors?: {
       [key: string]: string;
+      };
+    /**
+     * Per-agent PRESET-HISTORY bands (agent name to that member's complete ordered turns). The identified read
+     * ALWAYS states this map, `{}` when the definition seeds nothing - unlike `agent_models` and `agent_colors`
+     * above, which keep the non-empty omission rule. The difference is capability, not data: a harness PATCH
+     * REPLACES `agent_prefixes` and a present `{}` is the explicit clear of every stored band, so a client may
+     * only send the map it has READ, and a backend from before this feature answers the route with no such
+     * property. Absent therefore means "this server has no preset-history editor", and `{}` means "the editor
+     * exists and nothing is seeded" - a negotiation that only holds while an empty map is emitted. This is the
+     * one place a client READS the band text: unlike an instruction, whose text is a named subresource because
+     * one string per member still scales with the prompt, a band is an array of turns per member and the roster
+     * is bounded, so the identified read inlines it and no definition subresource exists for prefixes. A member
+     * absent from the map has no band, and a member keyed `[]` is echoed back, because an explicit "no preset
+     * history" is a stated choice. A card in a LIST row never carries the field, and neither does a SAVED
+     * SESSION's copy of this resource (`SessionDefinitionResource`, which keeps the non-empty rule because a
+     * session client negotiates the feature from the per-agent prefix route instead).
+     */
+    agent_prefixes?: {
+      [key: string]: HarnessPrefixTurn[];
       };
     /** One row per member, in the roster's DECLARATION ORDER. No text. */
     instruction_summary?: HarnessInstructionSummaryEntry[];
@@ -779,6 +809,21 @@ export interface CreateHarnessRequest {
       [key: string]: string;
       };
     /**
+     * Agent name to that member's PRESET HISTORY: the ordered `system` / `user` / `assistant` turns the agent
+     * is SEEDED with, immediately after its instruction block and before any conversation. An instruction says
+     * "you are X"; this says "this has already happened". Each supplied value is the member's COMPLETE ordered
+     * list - a key REPLACES that member's whole band, it never appends to one - and an explicit `[]` is a valid
+     * value meaning "this member starts with no preset history". Keys follow the same membership rule as the
+     * map above: every key names a member of the resulting definition, and `{}` clears every prefix. Like
+     * `agent_instructions`, the map is captured by the definition's factory, so a PATCH rebuilds the factory
+     * for FUTURE sessions and never rewrites a transcript an existing session already accumulated. Text is
+     * stored verbatim: no trim, no case change, and a turn carries only a role and its text (a tool role, a
+     * tool call, and an attachment are not part of this contract).
+     */
+    agent_prefixes?: {
+      [key: string]: HarnessPrefixTurn[];
+      };
+    /**
      * Agent name to an optional per-agent display COLOR: a CSS hex color (`#rgb`, `#rgba`, `#rrggbb` or
      * `#rrggbbaa`, either case). Purely cosmetic - it changes what a client paints, never what the agent runs -
      * but it is validated like every other field, so a stored color is always one the agent accepts and a
@@ -790,12 +835,12 @@ export interface CreateHarnessRequest {
 }
 
 /**
- * An omitted field keeps its current value; the name is immutable. `agent_models`, `agent_instructions` and
- * `agent_colors` REPLACE the map they name (`{}` clears it), and an override for a member this patch removes is
- * dropped rather than rejected. `agents` REPLACES the roster; an omitted `entry` keeps the current entry agent
- * when the new roster still contains it and otherwise falls back to the new roster's FIRST agent (a harness
- * whose entry agent left has to route to someone); `ranks` REPLACES the authority map, and a key naming an
- * agent outside the resulting roster is 400 rather than a silent drop.
+ * An omitted field keeps its current value; the name is immutable. `agent_models`, `agent_instructions`,
+ * `agent_prefixes` and `agent_colors` REPLACE the map they name (`{}` clears it), and an override for a member
+ * this patch removes is dropped rather than rejected. `agents` REPLACES the roster; an omitted `entry` keeps
+ * the current entry agent when the new roster still contains it and otherwise falls back to the new roster's
+ * FIRST agent (a harness whose entry agent left has to route to someone); `ranks` REPLACES the authority map,
+ * and a key naming an agent outside the resulting roster is 400 rather than a silent drop.
  * Closed object: the server sends no property outside this set (additionalProperties: false).
  */
 export interface UpdateHarnessRequest {
@@ -819,6 +864,19 @@ export interface UpdateHarnessRequest {
       };
     agent_instructions?: {
       [key: string]: string;
+      };
+    /**
+     * Replaces each member's complete preset-history band, with the same map semantics as the two maps above:
+     * `{}` clears every prefix, every key names a member of the resulting roster, and a band for a member this
+     * patch removes is dropped rather than rejected. An explicit `[]` states "this member starts with no preset
+     * history" and is a valid band, so clearing one member's history is `{ "agent_prefixes": { "editor": [] }
+     * }` - the member keeps its key and gets no turns. Accepted on every harness template: like an instruction
+     * override, a band retunes a seed inside the team the record already carries, so it does not take the
+     * durability gate a roster change takes. What it changes is the factory the NEXT session is built from; a
+     * session already running keeps the transcript it seeded.
+     */
+    agent_prefixes?: {
+      [key: string]: HarnessPrefixTurn[];
       };
     /**
      * Agent name to CSS hex color. `{}` clears every color, so every member falls back to the client's own
@@ -882,7 +940,12 @@ export interface HarnessInstructionTextResponse {
 /**
  * Receipt of a definition removal. Deliberately minimal: the authoritative record is that the entry is gone
  * (and, for a built-in, that its name is tombstoned so a restart does not re-ship it), not a second copy of the
- * definition on this route.
+ * definition on this route. The route answers 200 with exactly this shape; 404 for an unknown name, a repeat
+ * delete or an alias-only delete (an alias is a read redirect, not a deletable identity); 409 while any live or
+ * restored session belongs to this canonical harness OR while one of its session removals is still in flight -
+ * the message names the count, nothing is removed and no session is cascaded; and 500 when the durable registry
+ * write fails (nothing removed, registry rolled back) or when the owner-based knowledge cleanup fails AFTER the
+ * registry commit (the harness is already gone; a repeat DELETE is 404 and does not retry the cleanup).
  * Closed object: the server sends no property outside this set (additionalProperties: false).
  */
 export interface DeleteHarnessResult {
@@ -1559,8 +1622,15 @@ export interface DeleteSessionResult {
  * The harness definition this session captured at creation, which is the authority for its member set,
  * delegation allowlist, declared and core tools, and per-agent overrides - including the per-agent
  * `agent_colors` display map it inherits from `HarnessDefinition`, present only when the captured copy
- * configured at least one color. A saved session restores from this record, so a later global edit cannot move
- * it, and the swatches a client paints for this conversation come from here.
+ * configured at least one color. `agent_prefixes` follows that SAME non-empty rule here, which is the one place
+ * this resource answers differently from the `HarnessDefinition` it extends: the identified harness read always
+ * states the map (`{}` included) to advertise the template capability, while this read omits it while the
+ * captured copy seeds nothing - a session client negotiates preset history from the per-agent route (`GET
+ * /sessions/{id}/agents/{agent_id}/prefix`, 404 on a build that never mounted it), and a session frozen before
+ * the feature keeps its exact previous row. A member keyed `[]` makes the map non-empty and is echoed. A saved
+ * session restores from this record, so a later global edit cannot move it, and the swatches a client paints
+ * for this conversation come from here - as do the seeded bands, which live beside the session's own override
+ * in `preset.agentPrefixes`.
  */
 export type SessionDefinitionResource = HarnessDefinition
     & {
@@ -1847,6 +1917,19 @@ export interface CreateSessionAgentRequest {
      */
     instruction?: string;
     /**
+     * Optional PRESET HISTORY for this member: the ordered `system` / `user` / `assistant` turns it is seeded
+     * with after its instruction block. A supplied array is the member's complete band, stored verbatim and
+     * durable in this session's record, so the same history is re-seeded when the session is restored - `[]` is
+     * a valid value meaning "this member starts with no preset history", which for an agent bound from a
+     * profile member OVERRIDES the seeded band down to nothing, and for a session-defined agent means the same
+     * as omitting it. Omitted or null asks for nothing of its own: a profile member keeps the band its harness
+     * definition seeds, and an invented agent starts with no history. Turn validation is the shared one - a
+     * tool role, a non-string `content`, or a malformed array is 400, while a field outside `role`/`content` is
+     * ignored and never stored - and it runs BEFORE anything is bound, so a refused body adds no member. Text
+     * is never trimmed.
+     */
+    prefix?: HarnessPrefixTurn[];
+    /**
      * THE RANK this session gives the agent - delegation authority, for THIS session only. ANY letter binds,
      * several members may share one, and no rank is refused: the structural protection is the ENTRY agent, and
      * it is protected by MEMBERSHIP (a binding cannot detach it), not by a letter. An omitted or null value
@@ -1890,6 +1973,19 @@ export interface UpdateSessionAgentRequest {
      * turn has already been accepted against the prompt it will run.
      */
     instruction?: string | null;
+    /**
+     * The member's COMPLETE preset-history band, written with the same three-way rule as `instruction`: an
+     * omitted key is no change, an array REPLACES the whole band (`[]` is a complete band of no turns, which
+     * seeds this member with no preset history), and `null` removes the session's override so the member is
+     * re-seeded from the band its FROZEN harness definition carries - or from no history at all, when that
+     * definition seeds none. Like an instruction write it needs an idle session and answers 409 while a live
+     * run or queued work exists, and it rewrites only this member's seeded band: the turns it has already
+     * accumulated, every other member's transcript, the harness definition, and the global catalogue are
+     * untouched. Text is stored verbatim - no trim - and the turn rules are the shared ones, so a tool role, a
+     * non-string `content`, or a malformed array is 400, while a field outside `role`/`content` is ignored and
+     * never stored. The band is durable in this session's record, so a restart re-seeds the same history.
+     */
+    prefix?: HarnessPrefixTurn[] | null;
 }
 
 /**
@@ -1963,6 +2059,33 @@ export interface SessionInstructionTextResponse {
 }
 
 /**
+ * The preset history one session agent actually seeds, plus its provenance. The turns are the LIVE band, in
+ * order, verbatim - which is what makes this read worth addressing per agent: a band is an array rather than
+ * one string, so it stays in this named document and out of the roster row.
+ * Closed object: the server sends no property outside this set (additionalProperties: false).
+ */
+export interface SessionPrefixTurnsResponse {
+    session_id: string;
+    agent_id: string;
+    /**
+     * The member's complete ordered band, exactly as the next turn will read it. EMPTY when nothing seeds this
+     * member, which is also what `source: none` states; an empty band whose source is `session` means this
+     * conversation chose "no preset history" over the band its definition would have seeded.
+     */
+    prefix: HarnessPrefixTurn[];
+    /**
+     * Which layer wrote the band the member runs, in these three cases only: `session` for a band this
+     * conversation stored that DIFFERS from what its definition seeds, `harness` for the band the frozen
+     * harness definition seeds, and `none` when no layer seeds one. A session write that restates the
+     * definition's own bytes answers `harness`, because no reader - not the model, not a restart - can observe
+     * a difference that is not there. Unlike the instruction ladder there is no `catalogue` or `global` value,
+     * because a preset history has no catalogue layer - the shipped profiles seed no history, and the global
+     * profile layer stores text, not turns - and no band is ever inherited from a profile.
+     */
+    source: "harness" | "session" | "none";
+}
+
+/**
  * A catalogue projection plus the live session facts the catalogue cannot state. Composed additively, so the
  * catalogue shape a global read returns is unaffected by the session surface.
  */
@@ -2026,9 +2149,9 @@ export type SessionToolSummary = ToolSummary
     origin: "catalogue" | "discovered" | "created";
     /**
      * THE UNREGISTER AXIS, and nothing else: true for a name this conversation may not DELETE, because it is
-     * harness-owned - the figure is the kernel's own `toolManage remove` rule (`src/harness.ts` refuses a name
-     * whose REGISTERED `visibility` is `core`), read from the same live registry map the delete route asks.
-     * Consequences, stated exactly: a protected entry refuses DELETE with 403 and accepts a source PATCH
+     * harness-owned - the figure is the kernel's own `toolManage remove` rule (`src/harness.ts` refuses
+     * a name whose REGISTERED `visibility` is `core`), read from the same live registry map the delete route
+     * asks. Consequences, stated exactly: a protected entry refuses DELETE with 403 and accepts a source PATCH
      * (replacing an implementation is a different privilege from detaching the control plane). It does NOT
      * refuse the switch: `PATCH` with only `enabled` answers 200 for every row in this list, protected ones
      * included, while the session runs. `protected: false` is not a promise that DELETE succeeds either - an
@@ -3555,10 +3678,10 @@ export interface DisplayStep {
  * with the NUMBER of segments and never with their length. The bytes are exactly one identified read away at
  * the block detail route. The display and block routes transport the projector's record VERBATIM (./api.ts
  * `getSessionTurnDisplay` and `getSessionTurnBlock` cast, never restate, `projector.display()` and
- * `store.blockDetail()`), so these property names ARE the projector's field names (src/shared/turn-display.ts
- * `ContextBlock`): `name`, never a renamed `label`, is what the server sends. No time figure, no span, and no
- * `inPrompt` verdict is dropped by this record either, because every one of them is a figure the durable record
- * already holds and a client may not re-derive.
+ * `store.blockDetail()`), so these property names ARE the projector's field names
+ * (src/shared/turn-display.ts `ContextBlock`): `name`, never a renamed `label`, is what the server
+ * sends. No time figure, no span, and no `inPrompt` verdict is dropped by this record either, because every one
+ * of them is a figure the durable record already holds and a client may not re-derive.
  * Closed object: the server sends no property outside this set (additionalProperties: false).
  */
 export interface ContextBlock {
@@ -3578,9 +3701,9 @@ export interface ContextBlock {
      * projection. ABSENT means lane 0, the default lane, so a producer that says nothing is lane 0 and a client
      * never synthesizes another number. Assigned at MINT time by the `context:add` that creates the block and
      * IMMUTABLE afterwards, so it is not a key of `ContextBlockPatch` (the shared whitelist in
-     * src/shared/turn-display.ts `ContextBlockPatch` is the authority): a block that would change lanes is a
-     * `context:remove` + `context:add` pair, exactly like an identity-field change. The NUMBER is opaque here -
-     * the server decides what mints a new lane, a renderer only groups rows by it.
+     * src/shared/turn-display.ts `ContextBlockPatch` is the authority): a block that would change lanes
+     * is a `context:remove` + `context:add` pair, exactly like an identity-field change. The NUMBER is opaque
+     * here - the server decides what mints a new lane, a renderer only groups rows by it.
      */
     lane?: number;
     /**
@@ -3673,14 +3796,14 @@ export interface ContextBlock {
      * segment opaque with no control offered. The block detail route states it, because that read holds BOTH
      * the recorded event and the live transcript; `PATCH` on this same path writes it. A client never derives
      * it. ONE FIELD NAME, TWO HONEST GRANULARITIES, and they differ in exactly ONE case (the in-repo model
-     * src/shared/turn-display.ts `ContextBlock.included` is the authority and states the same rule; this schema
-     * is its verbatim wire alias). The BLOCK DETAIL read (./api.ts `getSessionTurnBlock`) answers the ENTRY
-     * this segment resolves to, per entry — that is the verdict the dialog's chip switches, and the one `PATCH`
-     * on this path writes. The DISPLAY read (./api.ts `getSessionTurnDisplay`, which stamps the figure through
-     * `contextSegmentIncludedOf`) answers the SEGMENT the lane paints: a tool's request and its answer are ONE
-     * segment while this field is ONE boolean, so a segment is `false` only when NOTHING of it reaches the
-     * prompt any more — a truncated request whose result still travels reads `true` on the lane and `false` on
-     * the detail read, and the two figures are honest about different things. The write is live: `PATCH` on
+     * src/shared/turn-display.ts `ContextBlock.included` is the authority and states the same rule; this
+     * schema is its verbatim wire alias). The BLOCK DETAIL read (./api.ts `getSessionTurnBlock`) answers the
+     * ENTRY this segment resolves to, per entry — that is the verdict the dialog's chip switches, and the one
+     * `PATCH` on this path writes. The DISPLAY read (./api.ts `getSessionTurnDisplay`, which stamps the figure
+     * through `contextSegmentIncludedOf`) answers the SEGMENT the lane paints: a tool's request and its answer
+     * are ONE segment while this field is ONE boolean, so a segment is `false` only when NOTHING of it reaches
+     * the prompt any more — a truncated request whose result still travels reads `true` on the lane and `false`
+     * on the detail read, and the two figures are honest about different things. The write is live: `PATCH` on
      * this path publishes ONE `context:set { included }` op carrying the SEGMENT figure (./api.ts
      * `patchSessionTurnBlock`), so the bar dims on the frame of the click and the display read that follows
      * cannot un-dim it. The write receipt carries the per-ENTRY figure instead, because that is the verdict the
@@ -3843,23 +3966,24 @@ export interface PatchTurnBlockRequest {
     /**
      * The segment's OWN prompt axis, resolved through the join that can name this segment's entry. For a `tool`
      * segment it addresses the ONE transcript ENTRY behind that segment — never the unit around it. `false`
-     * stores the flag core keeps only as a literal `false` (src/core/agent.ts `withIncluded`), `true` removes
-     * it, which is how a reader switches a segment back on, and NOTHING fans out to a sibling: a policy that
-     * wants a whole exchange out of the requests writes each entry it names. Provider pairing survives without
-     * a cascade because the projection answers every emitted `tool_calls[]` slot — a withheld request entry
-     * lets its results ride as an ownerless `tool` message, and a withheld result is replaced in the request by
-     * a synthetic `withheld` tool message (src/harness.ts `projectTranscript`). For a `reasoning` segment the
-     * same field addresses that entry's THINKING, because thinking is what rides in the prompt for a thinking
-     * window — it is the same figure this path's `GET` publishes as `included`, so the write mirrors the read.
+     * stores the flag core keeps only as a literal `false` (src/core/agent.ts `withIncluded`), `true`
+     * removes it, which is how a reader switches a segment back on, and NOTHING fans out to a sibling: a policy
+     * that wants a whole exchange out of the requests writes each entry it names. Provider pairing survives
+     * without a cascade because the projection answers every emitted `tool_calls[]` slot — a withheld request
+     * entry lets its results ride as an ownerless `tool` message, and a withheld result is replaced in the
+     * request by a synthetic `withheld` tool message (src/harness.ts `projectTranscript`). For a
+     * `reasoning` segment the same field addresses that entry's THINKING, because thinking is what rides in the
+     * prompt for a thinking window — it is the same figure this path's `GET` publishes as `included`, so the
+     * write mirrors the read.
      */
     included?: boolean;
     /**
      * The THINKING axis, named explicitly (trimmer uplift T7): the per-entry `reasoningIncluded` flag core's
-     * `turn.before setReasoningIncluded` writes (src/harness.ts `setReasoningIncluded`). It withholds ONE
-     * assistant entry's thinking from its projection copy while the entry itself keeps travelling, and there is
-     * NO unit cascade, because thinking belongs to exactly one entry. It resolves through the thought join
-     * only, so it is writable on a `reasoning` segment and refused 409 on any other kind, whose recorded bytes
-     * name no thinking text. `false` stores the flag and `true` removes it, the same minimal-delta rule
+     * `turn.before setReasoningIncluded` writes (src/harness.ts `setReasoningIncluded`). It withholds
+     * ONE assistant entry's thinking from its projection copy while the entry itself keeps travelling, and
+     * there is NO unit cascade, because thinking belongs to exactly one entry. It resolves through the thought
+     * join only, so it is writable on a `reasoning` segment and refused 409 on any other kind, whose recorded
+     * bytes name no thinking text. `false` stores the flag and `true` removes it, the same minimal-delta rule
      * `included` follows. When a thinking segment's body carries both fields they address the same entry and
      * this field — the one that names the axis — decides.
      */

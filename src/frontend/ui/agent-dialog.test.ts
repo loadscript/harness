@@ -39,14 +39,28 @@
 //     dialog never offers that form;
 //   - R6: an agent a conversation already runs keeps its badge but cannot be removed,
 //     and the reason is visible rather than tooltip-only; a saved conversation's fixed
-//     entry agent (`canSetEntry: false`) cannot be made the entry agent.
+//     entry agent (`canSetEntry: false`) cannot be made the entry agent;
+//   - the PRESET-TURN editor (the underload agent `prefix`): `options.prefixes` presence is
+//     the capability contract, so a host that passes it gets an editable ordered section
+//     under the instruction (role select + verbatim content + add/remove/move, an empty
+//     state and its Add control) and a host that does not renders none and keeps the exact
+//     legacy payload — pinned on the apply payload's KEY LIST, because `toEqual` forgives an
+//     `undefined` key. The delta is the complete ordered replacement per touched, rostered
+//     agent, an emptied history is an explicit `[]`, the host's own arrays are never
+//     written through, and focus/caret restoration follows the row, not the section.
 //
 // Every assertion names the exact expected value — see the deterministic rule.
 
 import type { AgentDescriptor } from '../../server/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openAgentDialog } from './agent-dialog';
-import type { AgentApplyResult, AgentConfigurationApply, AgentDialog, AgentDialogOptions } from './agent-dialog';
+import type {
+    AgentApplyResult,
+    AgentConfigurationApply,
+    AgentDialog,
+    AgentDialogOptions,
+    AgentDialogPrefixTurn
+} from './agent-dialog';
 
 const agents: AgentDescriptor[] = [
     {
@@ -253,6 +267,77 @@ const typeInstruction = (text: string): void => {
 const chooseModel = (id: string): void => {
     const select = modelSelect();
     select.value = id;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+};
+
+// ---------------------------------------------------------------------------
+// THE PRESET-TURN EDITOR (the underload agent `prefix`): the ordered system/user/assistant
+// history a NEW conversation is seeded with after its instruction.
+//
+// The row list IS the contract — its order is the seeded order — so the readers below walk
+// it in DOCUMENT order and report both machine facts (`data-role`) and live control values
+// (the textarea's value). A rebuild that dropped, duplicated, re-ordered or re-labelled a
+// row therefore fails visibly instead of quietly changing what the next save sends.
+// ---------------------------------------------------------------------------
+const prefixSection = (): HTMLElement => byClass('.agent-dialog-prefixes', 'div');
+
+const prefixRows = (): HTMLElement[] =>
+    [...prefixSection().querySelectorAll<HTMLElement>('.agent-dialog-prefix-row')];
+
+// `[role, content]` per row, in the order the agent would be seeded with them.
+const prefixTurns = (): [string, string][] =>
+    prefixRows().map((row) => [
+        row.dataset.role ?? '',
+        row.querySelector<HTMLTextAreaElement>('.agent-dialog-prefix-content')?.value ?? ''
+    ]);
+
+const prefixRoleSelect = (index: number): HTMLSelectElement => {
+    const found = prefixRows()[index]?.querySelector<HTMLSelectElement>(
+        '.agent-dialog-prefix-role'
+    );
+    if (found === undefined) throw new Error(`missing role select on preset turn ${index}`);
+
+    return found;
+};
+
+const prefixContentBox = (index: number): HTMLTextAreaElement => {
+    const found = prefixRows()[index]?.querySelector<HTMLTextAreaElement>(
+        '.agent-dialog-prefix-content'
+    );
+    if (found === undefined) throw new Error(`missing content box on preset turn ${index}`);
+
+    return found;
+};
+
+// The row controls are addressed by ACTION + POSITION, exactly as the dialog's focus layer
+// addresses them, so a test pressing "the up arrow of row 1" cannot silently press another
+// row's arrow after a reorder.
+const prefixAction = (action: string, index: number): HTMLButtonElement => {
+    const found = prefixSection().querySelector<HTMLButtonElement>(
+        `.agent-dialog-prefix-action[data-action="${action}"][data-index="${index}"]`
+    );
+    if (found === null) throw new Error(`missing ${action} control on preset turn ${index}`);
+
+    return found;
+};
+
+const prefixAddButton = (): HTMLButtonElement => byClass('.agent-dialog-prefix-add', 'button');
+const prefixEmptyNote = (): HTMLParagraphElement => byClass('.agent-dialog-prefix-empty', 'p');
+// The visible sentence under the section label, which F3 makes scope-aware: it is the only
+// preset copy a reader sees WITHOUT hovering, so both scopes' wording is pinned here.
+const prefixNote = (): HTMLParagraphElement => byClass('.agent-dialog-prefix-note', 'p');
+
+// Typing/changing means the control's OWN event: the draft is written on `input`/`change`,
+// so assigning a value alone would skip the handler the product depends on.
+const typePrefixContent = (index: number, text: string): void => {
+    const box = prefixContentBox(index);
+    box.value = text;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+};
+
+const choosePrefixRole = (index: number, role: string): void => {
+    const select = prefixRoleSelect(index);
+    select.value = role;
     select.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
@@ -1901,5 +1986,692 @@ describe('a fixed entry agent (R5 canSetEntry)', () => {
         expect(apply.calls).toEqual([
             { agent: 'research', entry: 'research', models: {}, instructions: {}, add: [], remove: [] }
         ]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// THE PRESET-TURN EDITOR — the underload agent's `prefix`: the ordered system/user/assistant
+// history a NEW conversation seeds after its instruction. Presence of `options.prefixes` is
+// the whole capability contract: with it every rostered agent gets an editable section under
+// its instruction; without it the dialog renders no prefix UI and its apply payload keeps the
+// exact pre-prefix shape (asserted on the KEY LIST, because `toEqual` would forgive an
+// `prefixes: undefined` key). The delta is always the COMPLETE ordered replacement list of a
+// TOUCHED, ROSTERED agent — never a per-row patch — and an emptied list is an explicit [].
+// ---------------------------------------------------------------------------
+describe('the preset-turn editor (the underload agent `prefix`)', () => {
+    // The seeded history, in the order the library seeds it: the SYSTEM turn sits after the
+    // instruction, then a scripted user/assistant exchange. The user turn's surrounding
+    // whitespace and the assistant turn's metadata (`reasoning`, `included`, `messageId`) are
+    // the two facts a careless editor would throw away, so every payload below restates them.
+    const SEEDED: AgentDialogPrefixTurn[] = [
+        { role: 'system', content: 'You remember the case files.' },
+        { role: 'user', content: '  What changed since Tuesday?  ' },
+        {
+            role: 'assistant',
+            content: 'Nothing was filed.',
+            reasoning: 'Checked the docket.',
+            included: false,
+            messageId: 'msg-7'
+        }
+    ];
+
+    // A fresh copy per test: the dialog clones on the FIRST edit, and a bug that wrote
+    // through to the host's objects would otherwise leak into the next test.
+    const seed = (): Record<string, AgentDialogPrefixTurn[]> => ({
+        instruct: SEEDED.map((turn) => ({ ...turn })),
+        research: []
+    });
+
+    it('lists the seeded order under the instruction, one editable row per turn', () => {
+        dialog = openAgentDialog(base({ prefixes: seed() }));
+
+        // POSITION is part of the contract: the section sits directly UNDER the instruction,
+        // because that is where the seeded order continues — instruction, then these turns,
+        // then the conversation. The panel's own child order is the machine-readable proof.
+        const config = byClass('.agent-dialog-config', 'section');
+        expect([...config.children].map((node) => node.className)).toEqual([
+            'agent-dialog-label',
+            'agent-dialog-instruction field-input',
+            'agent-dialog-prefixes',
+            'agent-dialog-membership'
+        ]);
+
+        // The preset turns are SEPARATE turns, not a second copy of the instruction: the box
+        // still holds this agent's own default instruction, untouched.
+        expect(instructionBox().value).toBe('Answer directly.');
+
+        expect(prefixSection().dataset.agent).toBe('instruct');
+        expect(prefixSection().dataset.count).toBe('3');
+        expect(prefixSection().getAttribute('role')).toBe('group');
+        expect(prefixSection().getAttribute('aria-label')).toBe('Preset turns for Instruct');
+        expect(prefixSection().querySelector('.agent-dialog-label')?.textContent).toBe('Preset turns');
+
+        // The ORDER, verbatim — the leading/trailing spaces are the reader's text, not noise.
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.']
+        ]);
+        expect(prefixRows().map((row) => row.dataset.index)).toEqual(['0', '1', '2']);
+
+        // EXACTLY the three roles `prefix` admits, in that order, and never `tool`: a tool
+        // result answers a `tool_calls` block this field cannot carry.
+        for (const index of [0, 1, 2]) {
+            expect([...prefixRoleSelect(index).options].map((option) => option.value)).toEqual([
+                'system',
+                'user',
+                'assistant'
+            ]);
+        }
+        expect(prefixRoleSelect(0).value).toBe('system');
+        expect(prefixRoleSelect(1).value).toBe('user');
+        expect(prefixRoleSelect(2).value).toBe('assistant');
+
+        // Every control names its agent and its position, so a screen reader never hears two
+        // identical labels for two different turns.
+        expect(prefixRoleSelect(1).getAttribute('aria-label')).toBe('Role for preset turn 2 for Instruct');
+        expect(prefixContentBox(1).getAttribute('aria-label')).toBe('Content for preset turn 2 for Instruct');
+        expect(prefixAddButton().getAttribute('aria-label')).toBe('Add a preset turn for Instruct');
+        expect(prefixAddButton().textContent).toBe('+ Add turn');
+        expect(prefixContentBox(0).disabled).toBe(false);
+        expect(prefixContentBox(0).title).toBe(
+            'A preset turn this agent starts a new conversation with. Saved on this harness template for new sessions.'
+        );
+        // F3: the visible sentence is the one a reader sees WITHOUT hovering, so the template's
+        // wording is pinned here as the half that did NOT change — on a template the band really is
+        // only what a NEW session seeds (`api-reads.ts harnessDefinitionOf` → registry factory).
+        expect(prefixNote().textContent).toBe(
+            'Turns this agent already has behind it. A new conversation is seeded with them after its instruction, in this order.'
+        );
+
+        // The ends of the list have nowhere to move, and say why on the control (R3: no
+        // explanation paragraph; a disabled control that cannot state its reason is the bug).
+        expect(prefixAction('up', 0).disabled).toBe(true);
+        expect(prefixAction('up', 0).title).toBe(
+            'This is the first preset turn: it is seeded straight after the instruction.'
+        );
+        expect(prefixAction('down', 2).disabled).toBe(true);
+        expect(prefixAction('down', 2).title).toBe(
+            'This is the last preset turn: it is the newest memory a new conversation starts with.'
+        );
+        expect(prefixAction('up', 1).disabled).toBe(false);
+        expect(prefixAction('up', 1).title).toBe(
+            'Move this preset turn one place earlier in the order a new conversation is seeded with.'
+        );
+        expect(prefixAction('remove', 1).title).toBe('Remove this preset turn when you save.');
+        expect(prefixAction('remove', 2).getAttribute('aria-label')).toBe(
+            'Remove preset turn 3 from Instruct'
+        );
+    });
+
+    it('states the empty history as a fact and still offers the Add control', () => {
+        dialog = openAgentDialog(base({ prefixes: seed() }));
+
+        selectAgent('research');
+
+        // An agent the map lists with NO turns is an honest empty editor: the section is
+        // still there, its state is stated, and the affordance to change it is enabled.
+        expect(prefixSection().dataset.agent).toBe('research');
+        expect(prefixSection().dataset.count).toBe('0');
+        expect(prefixRows()).toEqual([]);
+        expect(prefixEmptyNote().textContent).toBe(
+            'No preset turns · a new conversation starts with the instruction alone.'
+        );
+        expect(prefixAddButton().disabled).toBe(false);
+        expect(prefixAddButton().title).toBe(
+            'Add an empty preset turn at the end of this history. Saved with the rest when you save.'
+        );
+    });
+
+    it('names the scope a save writes on the preset controls (R5)', () => {
+        dialog = openAgentDialog(base({ prefixes: seed(), scope: 'session' }));
+
+        // F3 — the SESSION sentence, unlike the template's above, may not claim the write only
+        // starts a future conversation. An accepted band write on a conversation goes to that
+        // member's own brain, and the engine moves THREE lives at once: the live transcript band
+        // (so this conversation's default conversation runs the new history on its NEXT turn), the
+        // `reset()` baseline, and the band a NEW host thread seeds. What it does not rewrite is a
+        // separate host thread that already exists — each keeps the transcript it was seeded with
+        // (underload `src/engine/harness.ts setAgentPrefix`, `src/engine/core/agent.ts writePrefix`,
+        // mirrored by `src/server/sessions.ts setSessionAgentPrefix`).
+        expect(prefixContentBox(0).title).toBe(
+            'A preset turn this agent runs behind in this conversation, from its next turn · a separate conversation it already has keeps its own history.'
+        );
+        expect(prefixRoleSelect(0).title).toBe(
+            'A preset turn this agent runs behind in this conversation, from its next turn · a separate conversation it already has keeps its own history.'
+        );
+        // The hovering-free sentence carries the same rule, so a reader who never hovers is not
+        // told the template's version of it.
+        expect(prefixNote().textContent).toBe(
+            'Turns this agent already has behind it. This conversation is seeded with them from its next turn, and every new or reset conversation of this agent starts from them.'
+        );
+
+        // The two "starts with the instruction alone" sentences used to state the template's rule
+        // for a conversation too. Walking the list down proves both halves in one pass: the LAST
+        // row's removal, then the empty state it leaves behind.
+        prefixAction('remove', 2).click();
+        prefixAction('remove', 1).click();
+
+        expect(prefixAction('remove', 0).title).toBe(
+            'Remove this preset turn, so this conversation starts with its instruction alone from its next turn.'
+        );
+
+        prefixAction('remove', 0).click();
+
+        expect(prefixSection().dataset.count).toBe('0');
+        expect(prefixEmptyNote().textContent).toBe(
+            'No preset turns · this conversation starts with the instruction alone from its next turn.'
+        );
+    });
+
+    it('renders no preset UI and the exact legacy payload without `prefixes`', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ onApply: apply.onApply }));
+
+        // Absence of the option is absence of the feature: no section, no add control, and no
+        // empty wrapper left behind either.
+        expect(document.querySelector('.agent-dialog-prefixes')).toBeNull();
+        expect(document.querySelector('.agent-dialog-prefix-add')).toBeNull();
+        expect(document.querySelector('.agent-dialog-prefix-empty')).toBeNull();
+
+        typeInstruction('Answer in three words.');
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toEqual([
+            {
+                agent: 'instruct',
+                models: {},
+                instructions: { instruct: 'Answer in three words.' },
+                add: [],
+                remove: []
+            }
+        ]);
+        // BYTE compatibility, not just value compatibility: `toEqual` forgives an explicit
+        // `prefixes: undefined`, so the key list itself is what proves the old payload.
+        expect(Object.keys(apply.calls[0] ?? {})).toEqual([
+            'agent',
+            'models',
+            'instructions',
+            'add',
+            'remove'
+        ]);
+    });
+
+    it('edits a role and a content box as a local draft and sends the whole list', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        typePrefixContent(0, 'Answer from the case files only.');
+        choosePrefixRole(1, 'system');
+
+        // Editing is local until the action, exactly like an instruction edit.
+        expect(apply.calls).toEqual([]);
+        expect(prefixTurns()).toEqual([
+            ['system', 'Answer from the case files only.'],
+            ['system', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.']
+        ]);
+
+        // A prefix-only edit ARMS the action (requirement: `changesPending` sees it). The
+        // label stays the plain one — this press writes no entry move and no rank.
+        expect(applyButton().disabled).toBe(false);
+        expect(applyButton().textContent).toBe('Save configuration');
+        expect(applyButton().title).toBe('Save this configuration. Closing the dialog saves nothing.');
+
+        applyButton().click();
+        await flush();
+
+        // The complete ordered replacement, legacy keys untouched, metadata intact, and the
+        // whitespace still verbatim.
+        expect(apply.calls).toEqual([
+            {
+                agent: 'instruct',
+                models: {},
+                instructions: {},
+                add: [],
+                remove: [],
+                prefixes: {
+                    instruct: [
+                        { role: 'system', content: 'Answer from the case files only.' },
+                        { role: 'system', content: '  What changed since Tuesday?  ' },
+                        {
+                            role: 'assistant',
+                            content: 'Nothing was filed.',
+                            reasoning: 'Checked the docket.',
+                            included: false,
+                            messageId: 'msg-7'
+                        }
+                    ]
+                }
+            }
+        ]);
+    });
+
+    it('appends an empty user turn, focuses it, and never writes through to the host arrays', async () => {
+        const apply = applyOf();
+        const baseline = seed();
+        dialog = openAgentDialog(base({ prefixes: baseline, onApply: apply.onApply }));
+
+        prefixAddButton().click();
+
+        // The new turn joins the END of the seeded order (it is the newest memory), and the
+        // view moves into it so the reader types straight away.
+        expect(prefixSection().dataset.count).toBe('4');
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.'],
+            ['user', '']
+        ]);
+        expect(document.activeElement).toBe(prefixContentBox(3));
+        expect(prefixRows()[3]?.dataset.role).toBe('user');
+
+        // The host's objects are the server's answer: an edit clones, it never writes through.
+        expect(baseline.instruct).toEqual(SEEDED);
+        expect(baseline.research).toEqual([]);
+
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls[0]?.prefixes).toEqual({
+            instruct: [
+                { role: 'system', content: 'You remember the case files.' },
+                { role: 'user', content: '  What changed since Tuesday?  ' },
+                {
+                    role: 'assistant',
+                    content: 'Nothing was filed.',
+                    reasoning: 'Checked the docket.',
+                    included: false,
+                    messageId: 'msg-7'
+                },
+                // The new turn is exactly this: no invented metadata.
+                { role: 'user', content: '' }
+            ]
+        });
+        // The delta never hands out an object the dialog is still showing.
+        expect(apply.calls[0]?.prefixes?.instruct?.[0]).not.toBe(baseline.instruct[0]);
+    });
+
+    it('removes turns one by one and sends an explicit clear for an emptied history', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        prefixAction('remove', 2).click();
+
+        expect(prefixSection().dataset.count).toBe('2');
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['user', '  What changed since Tuesday?  ']
+        ]);
+        // Focus stayed with the reader's place in the list: the row that took the freed slot.
+        expect(document.activeElement).toBe(prefixContentBox(1));
+
+        prefixAction('remove', 1).click();
+        expect(prefixSection().dataset.count).toBe('1');
+        // The last turn's own removal states what clearing it means, because `[]` is the
+        // preset editor's version of clearing the instruction box.
+        expect(prefixAction('remove', 0).title).toBe(
+            'Remove this preset turn, so a new conversation starts with its instruction alone.'
+        );
+
+        prefixAction('remove', 0).click();
+
+        expect(prefixSection().dataset.count).toBe('0');
+        expect(prefixEmptyNote().textContent).toBe(
+            'No preset turns · a new conversation starts with the instruction alone.'
+        );
+        // With no rows left, the Add control is the only thing worth keeping focus on.
+        expect(document.activeElement).toBe(prefixAddButton());
+
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toEqual([
+            {
+                agent: 'instruct',
+                models: {},
+                instructions: {},
+                add: [],
+                remove: [],
+                prefixes: { instruct: [] }
+            }
+        ]);
+    });
+
+    it('reorders the seeded list and sends the order it produced', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        prefixAction('up', 2).click();
+
+        // The assistant turn moved ahead of the user turn; everything else kept its place,
+        // and the moved row holds focus in its content box (its own arrow is disabled there).
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['assistant', 'Nothing was filed.'],
+            ['user', '  What changed since Tuesday?  ']
+        ]);
+        expect(document.activeElement).toBe(prefixContentBox(1));
+
+        // A press that cannot move (the last turn going down) leaves the draft untouched.
+        prefixAction('down', 2).click();
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['assistant', 'Nothing was filed.'],
+            ['user', '  What changed since Tuesday?  ']
+        ]);
+
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toHaveLength(1);
+        expect(apply.calls[0]?.prefixes).toEqual({
+            instruct: [
+                { role: 'system', content: 'You remember the case files.' },
+                {
+                    role: 'assistant',
+                    content: 'Nothing was filed.',
+                    reasoning: 'Checked the docket.',
+                    included: false,
+                    messageId: 'msg-7'
+                },
+                { role: 'user', content: '  What changed since Tuesday?  ' }
+            ]
+        });
+        // The order the payload carries IS the row order, entry for entry.
+        expect(apply.calls[0]?.prefixes?.instruct?.map((turn) => turn.role)).toEqual([
+            'system',
+            'assistant',
+            'user'
+        ]);
+    });
+
+    it('sends no prefix key for an agent the reader never touched', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        // One edit on the viewed agent; `research` has a baseline and an editor, and stays out
+        // of the request entirely (an untouched agent keeps what the server has).
+        typePrefixContent(0, 'Answer from the case files only.');
+        applyButton().click();
+        await flush();
+
+        expect(Object.keys(apply.calls[0] ?? {})).toEqual([
+            'agent',
+            'models',
+            'instructions',
+            'add',
+            'remove',
+            'prefixes'
+        ]);
+        expect(Object.keys(apply.calls[0]?.prefixes ?? {})).toEqual(['instruct']);
+    });
+
+    it('drops the preset edits of an agent that leaves the team', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        selectAgent('research');
+        prefixAddButton().click();
+        expect(prefixTurns()).toEqual([['user', '']]);
+
+        // The only touched agent is now a drafted removal: the server validates every map key
+        // against the FINAL member set, so its preset key must not go out.
+        removeButton().click();
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toEqual([
+            { agent: 'instruct', models: {}, instructions: {}, add: [], remove: ['research'] }
+        ]);
+        expect('prefixes' in (apply.calls[0] ?? {})).toBe(false);
+    });
+
+    it('gives a drafted addition an empty editor it can fill in', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        openPicker();
+        byClass('.agent-dialog-add-option[data-agent="reviewer"]', 'button').click();
+
+        // `reviewer` has no baseline entry (it is not on the team yet), so its editor honestly
+        // starts empty — and an agent the save would ADD may still carry preset turns.
+        expect(prefixSection().dataset.agent).toBe('reviewer');
+        expect(prefixSection().dataset.count).toBe('0');
+        prefixAddButton().click();
+
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toEqual([
+            {
+                agent: 'reviewer',
+                models: {},
+                instructions: {},
+                add: ['reviewer'],
+                remove: [],
+                prefixes: { reviewer: [{ role: 'user', content: '' }] }
+            }
+        ]);
+    });
+
+    it('keeps preset edits across tabs and through a refused write, and drops them on dismissal', async () => {
+        const apply = applyOf({
+            applied: false,
+            message: 'An agent save is still in flight · try again in a moment.'
+        });
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        typePrefixContent(0, 'Answer from the case files only.');
+        selectAgent('research');
+        prefixAddButton().click();
+
+        // Both agents keep their own drafts, visible wherever they were made.
+        selectAgent('instruct');
+        expect(prefixTurns()).toEqual([
+            ['system', 'Answer from the case files only.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.']
+        ]);
+        selectAgent('research');
+        expect(prefixTurns()).toEqual([['user', '']]);
+
+        applyButton().click();
+        await flush();
+
+        // Refused: still open, every edit still on screen, and the delta named both agents.
+        expect(dialog.isOpen).toBe(true);
+        expect(byClass('.agent-dialog-error', 'p').textContent).toBe(
+            'An agent save is still in flight · try again in a moment.'
+        );
+        expect(prefixSection().dataset.count).toBe('1');
+        expect(Object.keys(apply.calls[0]?.prefixes ?? {})).toEqual(['instruct', 'research']);
+
+        dialog.close();
+
+        // Re-opening starts from the server's answer, not from the dropped drafts.
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+        expect(prefixSection().dataset.count).toBe('3');
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.']
+        ]);
+        expect(apply.calls).toHaveLength(1);
+    });
+
+    it('follows the server for an untouched agent and keeps a touched one across a refresh', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        typePrefixContent(0, 'Answer from the case files only.');
+
+        dialog.update(
+            base({
+                prefixes: {
+                    instruct: [{ role: 'system', content: 'A newer instruction-side memory.' }],
+                    research: [{ role: 'system', content: 'Cite every source you name.' }]
+                },
+                onApply: apply.onApply
+            })
+        );
+
+        // Touched: the draft is the truth while it exists, even against a newer baseline.
+        expect(prefixTurns()).toEqual([
+            ['system', 'Answer from the case files only.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.']
+        ]);
+
+        // Untouched: the refresh lands, and a baseline that gained a turn shows it.
+        selectAgent('research');
+        expect(prefixSection().dataset.count).toBe('1');
+        expect(prefixTurns()).toEqual([['system', 'Cite every source you name.']]);
+
+        // Reading a refreshed history is a view change: no write, and the action still
+        // describes only the draft that is really armed.
+        expect(apply.calls).toEqual([]);
+        expect(applyButton().title).toBe('Save this configuration. Closing the dialog saves nothing.');
+    });
+
+    it('clears the drafts on an applied write so the next press only dismisses', async () => {
+        const apply = applyOf();
+        const saved: AgentDialogPrefixTurn[] = [
+            { role: 'system', content: 'You remember the case files.' },
+            { role: 'user', content: '  What changed since Tuesday?  ' },
+            {
+                role: 'assistant',
+                content: 'Two reports were filed.',
+                reasoning: 'Checked the docket.',
+                included: false,
+                messageId: 'msg-7'
+            }
+        ];
+
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        typePrefixContent(2, 'Two reports were filed.');
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toHaveLength(1);
+
+        // The applied write folds into the baseline the shell delivers next, so clearing the
+        // drafts leaves the truthful text on screen — and nothing left to save.
+        dialog.update(base({ prefixes: { instruct: saved, research: [] }, onApply: apply.onApply }));
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Two reports were filed.']
+        ]);
+        expect(applyButton().title).toBe('Nothing to save · this closes the dialog.');
+
+        // A press with an empty delta dismisses instead of writing, so an untouched history
+        // can never send a `prefixes` key by accident.
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toHaveLength(1);
+        expect(dialog.isOpen).toBe(false);
+    });
+
+    it('locks the preset editor with the real reason and keeps every turn readable', () => {
+        const hint = 'A session is being created; try again in a moment.';
+        dialog = openAgentDialog(
+            base({
+                prefixes: seed(),
+                editable: false,
+                hint,
+                models: { models: {}, catalogue: ['m1', 'm2'], fallbackModel: 'm1', editable: true }
+            })
+        );
+
+        // Shown as disabled text with the reason ON the control, never as a box whose typing
+        // would be thrown away — the same rule the instruction editor follows.
+        expect(prefixRoleSelect(0).disabled).toBe(true);
+        expect(prefixRoleSelect(0).title).toBe(
+            'Wait for the current run to finish before changing these preset turns.'
+        );
+        expect(prefixContentBox(0).disabled).toBe(true);
+        expect(prefixContentBox(0).title).toBe(
+            'Wait for the current run to finish before changing these preset turns.'
+        );
+        expect(prefixContentBox(0).value).toBe('You remember the case files.');
+
+        // The list controls carry the team lock's own reason (`hint`, never invented).
+        expect(prefixAddButton().disabled).toBe(true);
+        expect(prefixAddButton().title).toBe(hint);
+        for (const action of ['up', 'down', 'remove']) {
+            expect(prefixAction(action, 1).disabled).toBe(true);
+            expect(prefixAction(action, 1).title).toBe(hint);
+        }
+
+        // A forced press on a disabled control changes nothing, so a mid-run view cannot arm a
+        // write the server would refuse.
+        prefixAddButton().click();
+        prefixAction('up', 1).click();
+        expect(prefixSection().dataset.count).toBe('3');
+        expect(prefixTurns()).toEqual([
+            ['system', 'You remember the case files.'],
+            ['user', '  What changed since Tuesday?  '],
+            ['assistant', 'Nothing was filed.']
+        ]);
+    });
+
+    it('restores focus and the caret on the same preset controls across a rebuild', () => {
+        dialog = openAgentDialog(base({ prefixes: seed() }));
+
+        // The content box: the caret is part of its identity, so a live refresh must not
+        // restart the reader at the beginning of a long turn.
+        const box = prefixContentBox(1);
+        box.focus();
+        box.setSelectionRange(7, 7);
+        expect(document.activeElement).toBe(box);
+
+        dialog.update(
+            base({
+                prefixes: seed(),
+                models: { models: { instruct: 'm2' }, catalogue: ['m1', 'm2'], fallbackModel: 'm1', editable: true }
+            })
+        );
+
+        const rebuilt = prefixContentBox(1);
+        expect(rebuilt).not.toBe(box);
+        expect(document.activeElement).toBe(rebuilt);
+        expect(rebuilt.selectionStart).toBe(7);
+
+        // A different row is a different control: the key carries the index, so focus cannot
+        // land on the first box of the section.
+        const other = prefixContentBox(2);
+        other.focus();
+        dialog.update(base({ prefixes: seed() }));
+        expect(document.activeElement).toBe(prefixContentBox(2));
+        expect(document.activeElement).not.toBe(prefixContentBox(0));
+
+        // The role select, and the Add control, survive a rebuild too.
+        prefixRoleSelect(2).focus();
+        dialog.update(base({ prefixes: seed() }));
+        expect(document.activeElement).toBe(prefixRoleSelect(2));
+
+        prefixAddButton().focus();
+        dialog.update(base({ prefixes: seed() }));
+        expect(document.activeElement).toBe(prefixAddButton());
+    });
+
+    it('keeps the preset editor out of the way of a model-only save', async () => {
+        const apply = applyOf();
+        dialog = openAgentDialog(base({ prefixes: seed(), onApply: apply.onApply }));
+
+        // A model choice alone must not drag the untouched preset list into the request: the
+        // reader changing a model never edited a seeded turn.
+        chooseModel('m2');
+        applyButton().click();
+        await flush();
+
+        expect(apply.calls).toEqual([
+            { agent: 'instruct', models: { instruct: 'm2' }, instructions: {}, add: [], remove: [] }
+        ]);
+        expect('prefixes' in (apply.calls[0] ?? {})).toBe(false);
     });
 });

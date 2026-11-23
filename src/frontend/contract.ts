@@ -48,7 +48,8 @@ import type {
     AgentRank,
     HarnessActionAnswer,
     HarnessActionChoice,
-    HarnessActionRequest
+    HarnessActionRequest,
+    HarnessPrefixTurn
 } from '../types';
 // The rank vocabulary as VALUES (the type-only import above cannot supply them). They are
 // aliased to `*Value` inside this module because the PUBLIC names are re-exported below for
@@ -519,6 +520,197 @@ export const colorsForMembers = (
     }
 
     return result;
+};
+
+// ---------------------------------------------------------------------------
+// PER-AGENT PRESET HISTORY (U6) — the `agent_prefixes` map and a session's bands
+// ---------------------------------------------------------------------------
+//
+// The fourth sibling of the model/instruction/color maps, with ONE structural difference that
+// changes every rule below: a value is an ORDERED ARRAY of turns, not a string. That is why
+// `[]` is a stored value here (the three text maps delete a blank key — a band of no turns IS a
+// decision the server states and re-reads, so it survives), why an equality check cannot be a
+// string compare of two maps, and why the turns are projected to role + text on the way in: the
+// wire's `HarnessPrefixTurn` is closed (../shared/harness-api.ts, ../types/index.ts), so a turn
+// carrying anything else — an inherited prototype key, a `tool` role, a non-string `content` —
+// is not part of this contract and must never reach a PATCH body that the server validates
+// against `additionalProperties: false`.
+//
+// Cross-references: `agent_prefixes` on the identified definition read and on the harness PATCH
+// (../shared/harness-api.ts `HarnessDefinition` / `UpdateHarnessRequest`), the camelCase domain
+// mirror (../server/protocol.ts `HarnessDescriptor.agentPrefixes`), the per-agent session read
+// (`SessionPrefixTurnsResponse`, ./api.ts `getSessionAgentPrefix`), and the editor that consumes
+// it (./ui/agent-dialog.ts `AgentDialogOptions.prefixes`).
+
+// The three roles a preset band admits, in the order the editor's role select offers them. A
+// `tool` turn is absent on purpose: it answers an assistant `tool_calls` block a band never
+// carries, so an unpaired result would reach a provider as an orphan.
+const PREFIX_ROLES: readonly HarnessPrefixTurn['role'][] = ['system', 'user', 'assistant'];
+
+// One turn, projected to the closed wire shape, or `undefined` when the value is not a turn at
+// all. `content` stays VERBATIM — the server stores a band untrimmed, and a trim here would make
+// the shell's baseline differ by a space from the bytes the next read returns (which the
+// no-op guard would then report as a change).
+const prefixTurnOf = (value: unknown): HarnessPrefixTurn | undefined => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+    const { role, content } = value as { role?: unknown; content?: unknown };
+
+    if (typeof role !== 'string' || !(PREFIX_ROLES as readonly string[]).includes(role)) return undefined;
+    if (typeof content !== 'string') return undefined;
+
+    return { role: role as HarnessPrefixTurn['role'], content };
+};
+
+// The whole band one map entry holds, projected to the closed wire shape, or `undefined` when the
+// value is not an array at all (so a caller can tell "no band here" from "a band of no turns").
+// An ARRAY of zero turns IS a complete band and is KEPT — that is the `[]` clear the contract
+// spells `{ "agent_prefixes": { "editor": [] } }`. A malformed turn inside an otherwise good band
+// is dropped rather than guessed at, exactly like a blank entry in the three text maps above: the
+// shell restates only what it has actually SEEN. Each turn is a fresh `{ role, content }`, so a
+// result never aliases the payload it was read from.
+const prefixBand = (value: unknown): HarnessPrefixTurn[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+
+    return value
+        .map((turn) => prefixTurnOf(turn))
+        .filter((turn): turn is HarnessPrefixTurn => turn !== undefined);
+};
+
+// Per-agent PRESET HISTORY (`agentPrefixes`, the camelCase spelling of the wire's
+// `agent_prefixes`), read defensively. Absent stays an empty map here; when the caller has to
+// tell "states nothing" from "states an empty map", read `statedPrefixesOf` instead — for the
+// three text maps that difference is cosmetic, and for a band it is the whole editing capability.
+export const agentPrefixesOf = (source: {
+    agentPrefixes?: Record<string, HarnessPrefixTurn[]>;
+}): Record<string, HarnessPrefixTurn[]> => statedPrefixesOf(source) ?? {};
+
+// The same read as `agentPrefixesOf`, but `undefined` when this source states NO band map at all
+// (the field is absent, null, or not an object). This is the question the configuration dialog
+// answers about itself: a band map that was READ — even one that came back empty — is a known
+// baseline the shell may restate on a save, while an unread one is not, and sending `{}` against
+// an unread map would clear every band the server still holds.
+export const statedPrefixesOf = (source: {
+    agentPrefixes?: Record<string, HarnessPrefixTurn[]>;
+}): Record<string, HarnessPrefixTurn[]> | undefined => {
+    const map = source.agentPrefixes;
+
+    if (map === null || typeof map !== 'object' || Array.isArray(map)) return undefined;
+
+    const result: Record<string, HarnessPrefixTurn[]> = {};
+    for (const [name, band] of Object.entries(map)) {
+        // OWN entries only (a key resolving through the prototype is not a band this harness
+        // seeded), same rule as `agentColorsOf` above.
+        if (!Object.prototype.hasOwnProperty.call(map, name)) continue;
+
+        // A NON-array value is not a band, so that entry is dropped; an ARRAY of zero turns IS a
+        // complete band and is KEPT, because `{ "agent_prefixes": { "editor": [] } }` is how the
+        // contract spells "this member seeds no history" and a reader that dropped the key would
+        // turn a decision the definition owns back into an absence. A malformed turn inside an
+        // otherwise good band is dropped rather than guessed at, exactly like a blank entry in the
+        // three text maps above: the shell restates only what it has actually SEEN. Each turn is a
+        // fresh `{ role, content }`, so a result never aliases the payload it was read from.
+        const turns = prefixBand(band);
+        if (turns !== undefined) result[name] = turns;
+    }
+
+    return result;
+};
+
+// Filter a band map down to a member list, preserving MEMBER order and each band's turn order —
+// the band sibling of `modelsForMembers`/`instructionsForMembers`. Same reason (a harness PATCH
+// REPLACES the map it names, so every mutation sends the whole map), with the band rules:
+//   - a keyed `[]` is KEPT, because "this member seeds no history" is a stated decision and the
+//     clear the contract spells with an explicit empty array;
+//   - a member the map omits stays omitted — that is how a removed member's band leaves a complete
+//     PATCH map rather than lingering as a key the new roster would 400;
+//   - every band is a fresh array of fresh turn objects, so the request body never aliases the
+//     cached map the dialog keeps editing.
+export const prefixesForMembers = (
+    prefixes: Readonly<Record<string, HarnessPrefixTurn[]>>,
+    members: readonly string[]
+): Record<string, HarnessPrefixTurn[]> => {
+    const result: Record<string, HarnessPrefixTurn[]> = {};
+
+    for (const member of members) {
+        const band = prefixBand(prefixes[member]);
+        if (band !== undefined) result[member] = band;
+    }
+
+    return result;
+};
+
+// One band on its own, projected to the closed wire shape. This is what the per-agent session read
+// answers (`SessionPrefixTurnsResponse.prefix`, ./api.ts `getSessionAgentPrefix`), and the shell
+// stores exactly what comes back — no trimming, no reordering, and a turn outside
+// `system|user|assistant` or with a non-string `content` is dropped rather than guessed at,
+// because the PATCH body that would carry it back is validated against `additionalProperties:
+// false`. A missing or malformed band reads as `[]`, which is the same thing the contract says an
+// unseeded member has.
+export const prefixBandOf = (value: unknown): HarnessPrefixTurn[] => {
+    const turns = value === undefined ? undefined : prefixBand(value);
+
+    return turns ?? [];
+};
+
+// A defensive COPY of a band map: fresh keys, fresh arrays, fresh turn objects, every band still
+// projected. Used where the shell CANNOT keep the object it was handed — the body of a PATCH it is
+// about to let the caller mutate, or the cache it will keep as "what the server holds" after that
+// write — so a later dialog edit can never reach through into the accepted state.
+export const prefixesCopyOf = (
+    prefixes: Readonly<Record<string, HarnessPrefixTurn[]>>
+): Record<string, HarnessPrefixTurn[]> => statedPrefixesOf({ agentPrefixes: { ...prefixes } }) ?? {};
+
+// The ONE canonical spelling of "which members seed which history", for CHANGE DETECTION only:
+// member order, projected bands, and a band of ZERO turns left out — on this contract a keyed `[]`
+// and an absent key state the same server fact ("this member starts with the instruction alone"),
+// so a draft that only re-states that fact is not a change and must not fire a PATCH.
+//
+// Why a string and not a `sameX` compare: the no-op guard in ./main.ts already compares the roster,
+// the ranks and the two text maps through ONE canonical spelling (`ranksText` there), and this is
+// the same trick. ORDER IS PRESERVED on purpose — a band is a history, so the same turns in another
+// order are a DIFFERENT answer, and any set/keys compare would call that equal. The value that goes
+// to the SERVER keeps its explicit `[]` (see `prefixesForMembers`); only this compare drops it.
+export const prefixStateTextOf = (
+    prefixes: Readonly<Record<string, HarnessPrefixTurn[]>>,
+    members: readonly string[]
+): string =>
+    JSON.stringify(
+        Object.entries(prefixesForMembers(prefixes, members)).filter(([, band]) => band.length > 0)
+    );
+
+// Two band maps that describe the same server state. `undefined` (never read) is deliberately NOT
+// the same as `{}` (read, and nothing seeds any member) — unlike `sameStringMap` in ./main.ts,
+// where the two are equal because the only cost is asking again. Here the difference decides
+// whether the preset-turns editor exists at all, so a first read that came back EMPTY still has
+// to count as a change worth recording.
+//
+// ORDER IS A FACT, not noise: a band is the history the agent seeds, so two bands with the same
+// turns in a different order are DIFFERENT server state. That rules out any set/keys compare.
+export const samePrefixMap = (
+    left: Readonly<Record<string, HarnessPrefixTurn[]>> | undefined,
+    right: Readonly<Record<string, HarnessPrefixTurn[]>>
+): boolean => {
+    if (left === undefined) return false;
+
+    const names = Object.keys(left);
+
+    if (names.length !== Object.keys(right).length) return false;
+
+    for (const name of names) {
+        const mine = left[name];
+        const theirs = right[name];
+
+        if (!Array.isArray(mine) || !Array.isArray(theirs)) return false;
+        if (mine.length !== theirs.length) return false;
+
+        for (let index = 0; index < mine.length; index += 1) {
+            if (mine[index].role !== theirs[index].role) return false;
+            if (mine[index].content !== theirs[index].content) return false;
+        }
+    }
+
+    return true;
 };
 
 // A session may freeze the definition it started with (`harnessDefinition`). The

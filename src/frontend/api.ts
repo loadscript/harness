@@ -62,7 +62,11 @@ import { providerTimeoutsOf } from './provider-diagnostics';
 import type { ProviderTimeouts } from './provider-diagnostics';
 // The browser's own rank vocabulary. Only the roster/authority-map rule is needed at this
 // boundary; every other rank read goes through ./contract.ts accessors downstream.
-import { rosterRanksOf } from './contract';
+// U6's exception: `statedPrefixesOf` is used HERE, at the card/definition boundary, because a
+// preset band is a STRUCTURED value (an array of closed turns) rather than a string — the same
+// reason `rosterRanksOf` is the one contract helper this module already calls. Every other
+// consumer still reads bands through ./contract.ts.
+import { rosterRanksOf, statedPrefixesOf } from './contract';
 import { STATIC_API_CANDIDATES, isStaticPagesHost } from './deployment';
 import type {
     ActionChoiceInput,
@@ -127,6 +131,9 @@ import type {
     SessionToolResponse,
     SessionToolSourceResponse,
     SessionUsageResponse,
+    // U6: the ONE member's effective preset-history band (the read the session dialog seeds
+    // the preset-turns editor from), and the closed turn shape it carries.
+    SessionPrefixTurnsResponse,
     SubmitTaskRequest,
     TaskReceipt,
     ThreadResource,
@@ -154,7 +161,7 @@ import type {
     PatchTurnBlockRequest,
     TurnBlockWriteReceipt
 } from '../shared/harness-api';
-import type { AgentRank, HarnessEvent, HarnessUsage } from '../types';
+import type { AgentRank, HarnessEvent, HarnessPrefixTurn, HarnessUsage } from '../types';
 // The display subtree uses the GENERATED aliases in ../shared/harness-api (they ARE
 // ../shared/turn-display.ts's models). Naming them here is what makes this module's
 // returns "the wire contract", and ./display-project.ts is the single place that
@@ -1327,6 +1334,26 @@ export const getSessionAgentInstruction = (id: string, agentId: string): Promise
         )
     );
 
+// `GET .../agents/{id}/prefix` — the ordered PRESET HISTORY one member actually seeds
+// (../shared/harness-api.ts `SessionPrefixTurnsResponse`, route
+// `HARNESS_ROUTES.sessionsBySessionIdAgentsByAgentIdPrefix`). WHY A ROUTE OF ITS OWN when the
+// definition read inlines the harness's own map: a band is an ARRAY per member, so it stays out of
+// the roster row the way instruction TEXT does, and this is the only read that states what THIS
+// conversation seeds after the instruction block — a harness template's band plus whatever this
+// session overrode, already resolved, in order. `source` names the layer that wrote it
+// (`harness` | `session` | `none`); the shell renders `prefix` and never branches on the layer.
+//
+// A member that is not on this session's roster is a 404, and the transport throws: the caller
+// reads it per member and skips the one that failed, exactly as `loadSessionConfiguration` does
+// for the instruction read above.
+export const getSessionAgentPrefix = (id: string, agentId: string): Promise<SessionPrefixTurnsResponse> =>
+    request<SessionPrefixTurnsResponse>(
+        HARNESS_ROUTES.sessionsBySessionIdAgentsByAgentIdPrefix(
+            encodeURIComponent(id),
+            encodeURIComponent(agentId)
+        )
+    );
+
 // `GET /sessions/{id}/tools` — toolbox rows (catalogue projection + session facts),
 // argument schema, source text and results deliberately absent from every row.
 export const listSessionTools = (id: string, query: PageQuery = {}): Promise<Page<SessionToolPage['items'][number]> & { budget: SessionToolPage['budget'] }> =>
@@ -1676,6 +1703,17 @@ export type HarnessCardView = {
     // Absent (not empty) when nothing is configured, exactly like the two maps above, so a
     // `HarnessCard` row that never carries the field maps to a row that omits it.
     agentColors?: Record<string, string>;
+    // U6: the per-agent PRESET-HISTORY bands this definition seeds (`agent_prefixes`). The
+    // identified read is the ONLY publisher (a LIST card never carries the map, and a band is an
+    // array of turns rather than one string), and on a U6 server that read ALWAYS states the map —
+    // `{}` when the definition seeds nothing — while a backend from before the feature names no map
+    // at all. That presence is the capability the shell negotiates the preset editor from, so this
+    // row keeps it exactly: a stated map (empty included) maps to a stated key, and an absent field
+    // maps to an absent key rather than an invented empty map. A keyed `[]` is KEPT: "this member
+    // seeds no history" is a stated decision, not an absence. ./contract.ts `statedPrefixesOf` is how
+    // a caller tells the two apart, and ./main.ts `storedPrefixesOf` is where that answer decides
+    // whether the dialog's preset-turns editor exists.
+    agentPrefixes?: Record<string, HarnessPrefixTurn[]>;
     coreTools?: string[];
     instructionSummary?: HarnessInstructionSummaryEntry[];
 };
@@ -1718,6 +1756,25 @@ export const descriptorOf = (card: HarnessCard | HarnessDefinition): HarnessCard
     ...('agent_colors' in card && card.agent_colors !== undefined
         ? { agentColors: { ...card.agent_colors } }
         : {}),
+    // U6: `agent_prefixes` -> `agentPrefixes` (the contract's snake_case spelling of the same
+    // optional map, ../shared/harness-api.ts `HarnessDefinition.agent_prefixes`). Two rules keep
+    // this row honest:
+    //   - only a real OBJECT map is published. Absent, `null`, an array or a scalar all mean "this
+    //     document stated no band map", and the key stays off the view — ./contract.ts
+    //     `statedPrefixesOf` is the one accessor that answers that question. For the two text maps
+    //     above a fabricated `{}` costs only a repeated read; here it is the capability flag the
+    //     preset editor shows, and a `{}` the shell later sends back is the contract's EXPLICIT
+    //     clear of every stored band (`UpdateHarnessRequest.agent_prefixes`), so a malformed value
+    //     must not be read as "asked, and nothing is seeded";
+    //   - the value is projected turn by turn to the closed `system|user|assistant` + text shape and
+    //     COPIED, so the view never aliases the response object a later edit could mutate. A keyed
+    //     `[]` survives, because a band of no turns is a stated value on this contract.
+    ...(() => {
+        const stated =
+            'agent_prefixes' in card ? statedPrefixesOf({ agentPrefixes: card.agent_prefixes }) : undefined;
+
+        return stated === undefined ? {} : { agentPrefixes: stated };
+    })(),
     ...('core_tools' in card && card.core_tools !== undefined ? { coreTools: [...card.core_tools] } : {}),
     ...('instruction_summary' in card && card.instruction_summary !== undefined
         ? { instructionSummary: card.instruction_summary }

@@ -11,10 +11,19 @@ import type {
     SessionStreamItem,
     SessionTurn
 } from '../server/protocol';
+// The band turn itself comes from the kernel barrel, the same place production (./api.ts, ./main.ts)
+// and the wire alias (../shared/harness-api.ts `HarnessPrefixTurn`) read it: one role + text
+// discriminated union, `tool` unrepresentable by construction (../types/index.ts:717).
+import type { HarnessPrefixTurn } from '../types';
 import {
     agentColorsOf,
     agentInstructionsOf,
     agentModelsOf,
+    // U6: the PRESET-HISTORY band accessors. `statedPrefixesOf` answers the capability question the
+    // three text maps never had (was the map stated at all?), `prefixesForMembers` builds the
+    // complete map a harness PATCH has to send, `prefixStateTextOf` is the one spelling the no-op
+    // guard compares, and `samePrefixMap` decides whether a read moved anything.
+    agentPrefixesOf,
     agentsFromDescriptors,
     attemptCommitOf,
     builtinOf,
@@ -44,11 +53,19 @@ import {
     membersOf,
     modelsForMembers,
     pendingOf,
+    prefixBandOf,
+    prefixesCopyOf,
+    prefixesForMembers,
+    prefixStateTextOf,
     rankLabelOf,
     rankOf,
     ranksOf,
     retryOf,
     rosterRanksOf,
+    // `samePrefixMap` compares two band maps as SERVER state (order is a fact); `statedPrefixesOf`
+    // is the undefined-vs-{} capability answer both ./main.ts caches depend on.
+    samePrefixMap,
+    statedPrefixesOf,
     stepRank,
     toolDurationOf,
     uniqueNames,
@@ -769,5 +786,289 @@ describe('model-request success boundary (R3)', () => {
         // Every other event type is not a boundary.
         expect(attemptCommitOf(resultWith({}))).toBeUndefined();
         expect(attemptCommitOf(wakeupWith())).toBeUndefined();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// U6: the PRESET-HISTORY band accessors (`agent_prefixes` / `SessionPrefixTurnsResponse.prefix`)
+// ---------------------------------------------------------------------------
+//
+// A band is the ordered `system|user|assistant` history a NEW conversation is seeded with after its
+// instruction (../types/index.ts:703-717, ../shared/harness-api.ts `HarnessDefinition.agent_prefixes`
+// and `UpdateHarnessRequest.agent_prefixes`). Two rules make these helpers worth pinning exactly, and
+// both are the reason the three text maps' helpers could not be reused:
+//   - undefined is NOT `{}`: an UNREAD band map must never be sent back as the contract's explicit
+//     clear (`{}` wipes every stored band), while a map READ empty is a known baseline the shell may
+//     restate (`contract.ts:588-598`);
+//   - ORDER is a fact: the same turns in another order are different server state, so no set or key
+//     compare may stand in for the element-by-element ones below (`contract.ts:682-714`).
+describe('preset history bands', () => {
+    it('tells a stated band map from one the server never stated', () => {
+        // Absent, undefined, null, an array and a scalar all answer "this document stated no bands".
+        expect(statedPrefixesOf({})).toBeUndefined();
+        expect(statedPrefixesOf({ agentPrefixes: undefined })).toBeUndefined();
+        expect(statedPrefixesOf({ agentPrefixes: null as never })).toBeUndefined();
+        expect(statedPrefixesOf({ agentPrefixes: [] as never })).toBeUndefined();
+        expect(statedPrefixesOf({ agentPrefixes: 'nope' as never })).toBeUndefined();
+
+        // An empty object IS a statement — "asked, and no member seeds a history" — so it survives as
+        // an empty map instead of collapsing into the unread answer.
+        expect(statedPrefixesOf({ agentPrefixes: {} })).toEqual({});
+        expect(statedPrefixesOf({ agentPrefixes: { instruct: [] } })).toEqual({ instruct: [] });
+
+        // The painting accessor folds the same question into a map, because its callers only render.
+        expect(agentPrefixesOf({})).toEqual({});
+        expect(agentPrefixesOf({ agentPrefixes: null as never })).toEqual({});
+        expect(agentPrefixesOf({ agentPrefixes: { critic: [{ role: 'user', content: 'C' }] } })).toEqual({
+            critic: [{ role: 'user', content: 'C' }]
+        });
+
+        // OWN keys only: a band that resolves through the prototype chain was not seeded by THIS
+        // definition, so it is not a fact about this harness (same rule `agentColorsOf` follows).
+        const inherited = Object.create({
+            legacy: [{ role: 'user', content: 'from the prototype' }]
+        }) as Record<string, HarnessPrefixTurn[]>;
+
+        inherited.instruct = [{ role: 'user', content: 'own key' }];
+
+        expect(statedPrefixesOf({ agentPrefixes: inherited })).toEqual({
+            instruct: [{ role: 'user', content: 'own key' }]
+        });
+    });
+
+    it('drops a value that is not a band, and a turn that is not a turn', () => {
+        // A non-array entry is not a band at all, so that key leaves the map; the good key survives.
+        expect(
+            statedPrefixesOf({
+                agentPrefixes: { a: 'nope' as never, b: [{ role: 'user', content: 'ok' }] }
+            })
+        ).toEqual({ b: [{ role: 'user', content: 'ok' }] });
+
+        // Inside an otherwise good band a `tool` turn (a result answering an assistant `tool_calls`
+        // block a band never carries), a non-string `content`, and a non-object entry are each dropped
+        // rather than guessed at — the PATCH body that would carry them back is validated against
+        // `additionalProperties: false`.
+        expect(
+            statedPrefixesOf({
+                agentPrefixes: {
+                    a: [
+                        { role: 'tool', content: 'orphan' } as never,
+                        { role: 'user', content: 'kept' },
+                        { role: 'assistant', content: 7 } as never,
+                        'junk' as never
+                    ]
+                }
+            })
+        ).toEqual({ a: [{ role: 'user', content: 'kept' }] });
+    });
+
+    it('filters a band map to a member list in member order, keeping a stated empty band', () => {
+        const stored: Record<string, HarnessPrefixTurn[]> = {
+            instruct: [
+                { role: 'user', content: 'Q1' },
+                { role: 'assistant', content: 'A1' }
+            ],
+            summarizer: [{ role: 'user', content: 'S1' }],
+            // A member this save detached: its band must leave the complete map the PATCH replaces.
+            gone: [{ role: 'user', content: 'G1' }]
+        };
+
+        // MEMBER order, not the stored map's insertion order — the request body describes the team the
+        // definition ends up with.
+        expect(prefixesForMembers(stored, ['summarizer', 'instruct'])).toEqual({
+            summarizer: [{ role: 'user', content: 'S1' }],
+            instruct: [
+                { role: 'user', content: 'Q1' },
+                { role: 'assistant', content: 'A1' }
+            ]
+        });
+        expect(Object.keys(prefixesForMembers(stored, ['summarizer', 'instruct']))).toEqual([
+            'summarizer',
+            'instruct'
+        ]);
+
+        // `{ instruct: [] }` is a stated decision ("this member starts with the instruction alone"),
+        // so the key SURVIVES the filter; a member the map omits stays omitted, and a name the map
+        // never heard of adds nothing.
+        expect(prefixesForMembers({ instruct: [], critic: [{ role: 'user', content: 'C' }] }, ['instruct', 'critic', 'missing'])).toEqual({
+            instruct: [],
+            critic: [{ role: 'user', content: 'C' }]
+        });
+        // A roster that lists one name twice yields one key.
+        expect(Object.keys(prefixesForMembers(stored, ['instruct', 'instruct']))).toEqual(['instruct']);
+
+        // Fresh arrays of fresh turn objects: the request body of a PATCH that REPLACES the map must
+        // not alias the cached map the dialog is still editing.
+        const body = prefixesForMembers(stored, ['instruct']);
+
+        body.instruct[0].content = 'edited';
+
+        expect(stored.instruct[0].content).toBe('Q1');
+    });
+
+    it('projects one band, verbatim and in order, from any shape it is handed', () => {
+        // Never trimmed: the server stores a band untrimmed, and a trim here would make the shell's
+        // baseline differ by a space from the bytes the next read returns — the no-op guard would then
+        // report a change that is not there.
+        expect(prefixBandOf([{ role: 'user', content: '  keep  ' }])).toEqual([{ role: 'user', content: '  keep  ' }]);
+        // A missing or malformed band reads as "no history", which is the same answer the contract
+        // gives an unseeded member.
+        expect(prefixBandOf(undefined)).toEqual([]);
+        expect(prefixBandOf('nope')).toEqual([]);
+        expect(prefixBandOf([])).toEqual([]);
+        expect(prefixBandOf([{ role: 'tool', content: 'x' }, { role: 'system', content: 'ok' }])).toEqual([
+            { role: 'system', content: 'ok' }
+        ]);
+
+        // ORDER preserved, because a band IS the history: the same turns in another order are different
+        // state, and the editor's up/down controls depend on the shell storing what it was told.
+        expect(
+            prefixBandOf([
+                { role: 'user', content: 'first' },
+                { role: 'assistant', content: 'second' }
+            ]).map((turn) => turn.content)
+        ).toEqual(['first', 'second']);
+
+        // The per-agent read's payload is never aliased by the cache that stores it.
+        const read: HarnessPrefixTurn[] = [{ role: 'user', content: 'Q' }];
+        const cached = prefixBandOf(read);
+
+        cached[0].content = 'edited';
+
+        expect(read[0].content).toBe('Q');
+    });
+
+    it('copies a band map at every depth so a draft cannot reach the accepted state', () => {
+        const source: Record<string, HarnessPrefixTurn[]> = {
+            instruct: [{ role: 'user', content: 'Q1' }],
+            summarizer: []
+        };
+        const copy = prefixesCopyOf(source);
+
+        expect(copy).toEqual({
+            instruct: [{ role: 'user', content: 'Q1' }],
+            summarizer: []
+        });
+
+        copy.instruct[0].content = 'edited';
+        copy.summarizer.push({ role: 'user', content: 'appended' });
+
+        expect(source).toEqual({
+            instruct: [{ role: 'user', content: 'Q1' }],
+            summarizer: []
+        });
+        expect(prefixesCopyOf({})).toEqual({});
+    });
+
+    it('spells band state one canonical way for change detection, and no other way', () => {
+        const members = ['instruct', 'summarizer'];
+
+        // The one spelling is member-ordered [name, band] pairs: a plain `JSON.stringify` of two maps
+        // whose keys arrived in different orders would report a change that is not there.
+        expect(
+            prefixStateTextOf(
+                {
+                    instruct: [{ role: 'user', content: 'Q1' }],
+                    summarizer: [{ role: 'user', content: 'S1' }]
+                },
+                members
+            )
+        ).toBe(
+            JSON.stringify([
+                ['instruct', [{ role: 'user', content: 'Q1' }]],
+                ['summarizer', [{ role: 'user', content: 'S1' }]]
+            ])
+        );
+
+        // For CHANGE DETECTION (and only there) a band of zero turns states the same server fact as no
+        // key at all, so it is left out — while the value that goes to the server keeps its `[]`.
+        expect(
+            prefixStateTextOf(
+                { instruct: [], summarizer: [{ role: 'user', content: 'S1' }] },
+                members
+            )
+        ).toBe(JSON.stringify([['summarizer', [{ role: 'user', content: 'S1' }]]]));
+        expect(prefixStateTextOf({}, members)).toBe('[]');
+        expect(prefixStateTextOf({ gone: [{ role: 'user', content: 'not on the roster' }] }, members)).toBe('[]');
+
+        // A reordered band is a different answer, so the guard fires and the save happens.
+        expect(
+            prefixStateTextOf(
+                {
+                    instruct: [
+                        { role: 'user', content: 'one' },
+                        { role: 'assistant', content: 'two' }
+                    ]
+                },
+                members
+            )
+        ).not.toBe(
+            prefixStateTextOf(
+                {
+                    instruct: [
+                        { role: 'assistant', content: 'two' },
+                        { role: 'user', content: 'one' }
+                    ]
+                },
+                members
+            )
+        );
+        // And a one-character text difference is a different history too.
+        expect(prefixStateTextOf({ instruct: [{ role: 'user', content: 'one' }] }, members)).not.toBe(
+            prefixStateTextOf({ instruct: [{ role: 'user', content: 'One' }] }, members)
+        );
+    });
+
+    it('compares two band maps as server state, unread and empty included', () => {
+        const seeded: Record<string, HarnessPrefixTurn[]> = {
+            instruct: [{ role: 'user', content: 'Q1' }]
+        };
+
+        // THE capability rule: never-read is not the same as read-empty, in either direction
+        // (`sameStringMap` may treat them alike; a band map may not, because the difference decides
+        // whether the preset editor exists and whether a save may send `{}` at all).
+        expect(samePrefixMap(undefined, {})).toBe(false);
+        expect(samePrefixMap(undefined, seeded)).toBe(false);
+        expect(samePrefixMap({}, {})).toBe(true);
+
+        // The same ordered turns are the same state, whoever built the objects.
+        expect(samePrefixMap(seeded, { instruct: [{ role: 'user', content: 'Q1' }] })).toBe(true);
+
+        // A keyed `[]` and a missing key are different KEY sets, even though both leave the member with
+        // no history — the map the server holds really is different.
+        expect(samePrefixMap({}, { instruct: [] })).toBe(false);
+        expect(samePrefixMap({ instruct: [], summarizer: [] }, { instruct: [] })).toBe(false);
+
+        // Order, turn count, role and text are all part of the value.
+        expect(
+            samePrefixMap(
+                {
+                    instruct: [
+                        { role: 'user', content: 'a' },
+                        { role: 'assistant', content: 'b' }
+                    ]
+                },
+                {
+                    instruct: [
+                        { role: 'assistant', content: 'b' },
+                        { role: 'user', content: 'a' }
+                    ]
+                }
+            )
+        ).toBe(false);
+        expect(
+            samePrefixMap({ instruct: [{ role: 'user', content: 'a' }] }, {
+                instruct: [
+                    { role: 'user', content: 'a' },
+                    { role: 'user', content: 'b' }
+                ]
+            })
+        ).toBe(false);
+        expect(
+            samePrefixMap({ instruct: [{ role: 'user', content: 'a' }] }, { instruct: [{ role: 'user', content: 'a ' }] })
+        ).toBe(false);
+        expect(
+            samePrefixMap({ instruct: [{ role: 'user', content: 'a' }] }, { instruct: [{ role: 'assistant', content: 'a' }] })
+        ).toBe(false);
     });
 });
