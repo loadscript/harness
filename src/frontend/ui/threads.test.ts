@@ -376,4 +376,28 @@ describe('submitTargetLabel', () => {
         );
         expect(submitTargetLabel({ mode: 'new', queued: true })).toBe('New thread');
     });
+
+    it('names the model that answers, and only when the caller can name it', () => {
+        // The routing line states WHERE the message goes and WHAT answers it, so the
+        // model rides the same sentence in every mode.
+        expect(submitTargetLabel({ mode: 'new' }, 'vultr/ds4')).toBe('New thread (vultr/ds4)');
+        expect(submitTargetLabel({ mode: 'connected' }, 'vultr/ds4')).toBe('New connected thread (vultr/ds4)');
+        expect(submitTargetLabel({ mode: 'continue', threadId: 't', name: 'Writing' }, 'vultr/ds4')).toBe(
+            'Continuing Writing (vultr/ds4)'
+        );
+        expect(submitTargetLabel({ mode: 'steer', threadId: 't', name: 'T2' }, 'vultr/ds4')).toBe(
+            'Steering T2 (vultr/ds4)'
+        );
+        expect(submitTargetLabel({ mode: 'steer', threadId: 't', name: 'T2', queued: true }, 'vultr/ds4')).toBe(
+            'Queued in T2 (vultr/ds4)'
+        );
+
+        // `''`/whitespace/absent all mean "this browser cannot say", and the line then
+        // reads EXACTLY as it did before the model was part of it — no empty brackets.
+        expect(submitTargetLabel({ mode: 'new' }, '')).toBe('New thread');
+        expect(submitTargetLabel({ mode: 'new' }, '   ')).toBe('New thread');
+        expect(submitTargetLabel({ mode: 'new', queued: true }, undefined)).toBe('New thread');
+        // Surrounding spaces are the caller's noise, not the sentence's.
+        expect(submitTargetLabel({ mode: 'new' }, '  vultr/ds4  ')).toBe('New thread (vultr/ds4)');
+    });
 });

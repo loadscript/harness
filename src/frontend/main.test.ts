@@ -1834,7 +1834,7 @@ it('loads a conversation with every thread collapsed and the composer on a new t
     const target = byClass('.composer-target', 'p');
     expect(target.hidden).toBe(false);
     expect(target.dataset.mode).toBe('new');
-    expect(target.textContent).toBe('New thread');
+    expect(target.textContent).toBe('New thread (m1)');
 });
 
 it('keeps the thread the reader expanded open across a later stream frame', async () => {
@@ -1869,7 +1869,7 @@ it('keeps the thread the reader expanded open across a later stream frame', asyn
     expect(tiles[0]?.classList.contains('is-expanded')).toBe(false);
     const target = byClass('.composer-target', 'p');
     expect(target.dataset.mode).toBe('continue');
-    expect(target.textContent).toBe('Continuing RR2');
+    expect(target.textContent).toBe('Continuing RR2 (m1)');
 
     // A later authoritative frame: the same document, now settled. It must merge into
     // the open card, not rebuild the focus decision.
@@ -1893,7 +1893,7 @@ it('keeps the thread the reader expanded open across a later stream frame', asyn
     expect(expandedTiles()).toEqual([chosen]);
     expect(document.querySelectorAll('.tile-select[aria-expanded="true"]')).toHaveLength(1);
     expect(chosen.querySelector('.tile-select')?.getAttribute('aria-expanded')).toBe('true');
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing RR2');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing RR2 (m1)');
     expect(stub.reads).toEqual(['s1']);
 });
 
@@ -2186,7 +2186,7 @@ it('opens an entered conversation collapsed and keeps the reader expansion throu
     const chosen = tiles[1];
     chosen?.querySelector<HTMLButtonElement>('.tile-select')?.click();
     expect(expandedTiles()).toEqual([chosen]);
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing RR2');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing RR2 (m1)');
 
     // The live document settles: the open card merges in place and stays open.
     stub.emit({
@@ -2204,7 +2204,7 @@ it('opens an entered conversation collapsed and keeps the reader expansion throu
     await flush();
 
     expect(expandedTiles()).toEqual([chosen]);
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing RR2');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing RR2 (m1)');
     expect(stub.reads).toEqual(['ws-1']);
 });
 

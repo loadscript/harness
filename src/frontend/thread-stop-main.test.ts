@@ -273,7 +273,7 @@ it('shows Stop for a running thread and cancels it with one press and no dialog'
 
     // The stop does not destroy the conversation: the tile and its focus survive.
     expect(document.querySelector('.tile')).not.toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('Continuing IN1');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('Continuing IN1 (m1)');
 });
 
 it('turns the same control back into Delete once the stopped roster lands, and the delete still works', async () => {
@@ -316,5 +316,5 @@ it('turns the same control back into Delete once the stopped roster lands, and t
     ).toEqual([{ url: '/api/sessions/s1/threads/thread-a', method: 'DELETE' }]);
     expect(document.querySelector('.tile')).toBeNull();
     expect(document.querySelector('.dialog')).toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread (m1)');
 });

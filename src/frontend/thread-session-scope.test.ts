@@ -346,7 +346,7 @@ it('does not poison the next session with the previous session thread ids (N1)',
     byClass('.tile[data-turn-id="turn-9"] .tile-select', 'button').click();
     await flush(1);
     expect(document.querySelector('.tile.is-expanded')?.getAttribute('data-turn-id')).toBe('turn-9');
-    expect(target()).toBe('Steering IT1');
+    expect(target()).toBe('Steering IT1 (m1)');
 
     // s2 mints its own `thread-2`: the id used to be tombstoned by the switch, so
     // the roster row and the turn were dropped on arrival and only `thread-1`
@@ -375,7 +375,7 @@ it('does not poison the next session with the previous session thread ids (N1)',
     expect(tiles().map((tile) => tile.dataset.turnId)).toEqual(['turn-9', 'turn-10']);
     // The background adoption of `thread-2` must not steal the reader's focus (S1).
     expect(document.querySelector('.tile.is-expanded')?.getAttribute('data-turn-id')).toBe('turn-9');
-    expect(target()).toBe('Steering IT1');
+    expect(target()).toBe('Steering IT1 (m1)');
 });
 
 it('keeps a live turn that an older snapshot no longer lists (N2)', async () => {
@@ -394,7 +394,7 @@ it('keeps a live turn that an older snapshot no longer lists (N2)', async () => 
     // from the reader opening the running turn — which is what makes 'Steering' true.
     byClass('.tile[data-turn-id="turn-1"] .tile-select', 'button').click();
     await flush(1);
-    expect(target()).toBe('Steering IT1');
+    expect(target()).toBe('Steering IT1 (m1)');
 
     // A NEWER turn of another conversation arrives live.
     stub.emit('s2', {
@@ -422,7 +422,7 @@ it('keeps a live turn that an older snapshot no longer lists (N2)', async () => 
     expect(tiles().map((tile) => tile.dataset.turnId)).toEqual(['turn-1', 'turn-2']);
     expect(tiles().map((tile) => tile.dataset.state)).toEqual(['streaming', 'streaming']);
     expect(document.querySelector('.tile.is-expanded')?.getAttribute('data-turn-id')).toBe('turn-1');
-    expect(target()).toBe('Steering IT1');
+    expect(target()).toBe('Steering IT1 (m1)');
 });
 
 it('does not restore a # chip whose target was deleted while the submit was in flight (N3)', async () => {
@@ -447,7 +447,7 @@ it('does not restore a # chip whose target was deleted while the submit was in f
     // focuses nothing.
     byClass('.tile[data-turn-id="turn-1"] .tile-select', 'button').click();
     await flush(1);
-    expect(target()).toBe('Continuing IT1');
+    expect(target()).toBe('Continuing IT1 (m1)');
 
     // A real reference chip binding turn-1, plus surviving text after it.
     const input = byClass('.composer-input', 'div');
@@ -498,7 +498,7 @@ it('does not restore a # chip whose target was deleted while the submit was in f
     // so the routing text is the literal `New thread`. `paintComposerTarget` also
     // hides the line here: a `new` target in a session whose roster is now empty is
     // exactly the "nothing to distinguish from" case (`hidden` + `data-target=false`).
-    expect(target()).toBe('New thread');
+    expect(target()).toBe('New thread (m1)');
     expect(targetHidden()).toBe(true);
     expect(byClass('.composer-target', 'p').dataset.mode).toBe('new');
     // The held POST is untouched by the deletion snapshot: still one request.
@@ -526,7 +526,7 @@ it('does not restore a # chip whose target was deleted while the submit was in f
     // The rejection does not resurrect the focus either: its optimistic row is marked
     // `error` rather than re-focused, so the routing line still reads `New thread` and
     // the line stays hidden (empty roster + `new` mode).
-    expect(target()).toBe('New thread');
+    expect(target()).toBe('New thread (m1)');
     expect(targetHidden()).toBe(true);
 
     // Exactly one tile survives: the revoked submit's optimistic row. It is still

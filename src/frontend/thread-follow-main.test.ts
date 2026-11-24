@@ -433,7 +433,7 @@ it('follows a thread the reader expands: one subscription and one transcript, no
     // The card is open, and the conversation is the steering target the composer names —
     // the existing focus contract still holds on top of the new following.
     expect(childRow('thread-b').classList.contains('is-expanded')).toBe(true);
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Helper');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Helper (m1)');
 });
 
 it('re-establishes the plane when a thread is expanded while the socket is down', async () => {

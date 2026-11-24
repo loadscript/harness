@@ -4417,6 +4417,43 @@ composerPopup.hidden = true;
 const actionButton = el('button', 'composer-action');
 actionButton.type = 'submit';
 actionButton.hidden = true;
+// The send mark, and why it is a drawn path rather than the `▶` character this control
+// used to paint: flex centering centers a text glyph's EM BOX, and a triangle sits on the
+// baseline with an asymmetric side bearing, so the mark read low and left inside the
+// circle — and the exact offset moved with whichever font the host resolved. A path is
+// font-independent, so the mark sits exactly where it is drawn. The geometry below puts the
+// shape's CENTROID on the box centre: vertices (7.5,4), (7.5,20) and (21,12) average to
+// (12,12) in the 24×24 viewBox, which is the optical correction for a right-pointing
+// triangle — centering a triangle's bounding box leaves its visible mass left of the middle,
+// which is what makes a play glyph look off-centre. Paths, not icon fonts, for the same
+// reason and in the same hand-declared inline `<path>` idiom as ./ui/info-icon.ts and
+// ./ui/dialog.ts `COPY_ICONS`: this package ships no icon library.
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const SEND_MARK_PATH = 'M7.5 4v16L21 12z';
+
+const createSendMark = (): SVGSVGElement => {
+    const icon = document.createElementNS(SVG_NAMESPACE, 'svg');
+
+    icon.setAttribute('class', 'composer-action-glyph');
+    icon.setAttribute('viewBox', '0 0 24 24');
+    // Decoration: the accessible name is the button's own `aria-label`, and the mark must
+    // not join the tab order or be read as a second figure inside the control.
+    icon.setAttribute('aria-hidden', 'true');
+    icon.setAttribute('focusable', 'false');
+
+    const path = document.createElementNS(SVG_NAMESPACE, 'path');
+
+    path.setAttribute('d', SEND_MARK_PATH);
+    icon.append(path);
+
+    return icon;
+};
+
+// ONE node, re-mounted by every submit paint: the mark carries no state (the BUTTON does,
+// through `data-action`), and `paintComposer` runs on every keystroke, so a fresh element
+// per paint would churn the DOM for nothing.
+const sendMark = createSendMark();
+
 // SESSION-WIDE stop-all (R5/R7), separate from the submit action on purpose: with
 // independent threads running, "stop everything" must stay reachable while the
 // reader has a draft in the field. It is painted only when the inline action is not
@@ -5309,10 +5346,10 @@ const unfinishedReferenceCount = (
     }).length;
 };
 
-// Paint the composer's routing line: where this draft will go if sent now. It reads
-// the SAME inputs as `run()` (focus + `#` reference chips + ready attachments)
-// through the same pure helper (`resolveSubmitTarget`), AND the same agent plan
-// (`agentSendPlanOf`), so the promise and the request cannot disagree.
+// Paint the composer's routing line: where this draft will go if sent now, and which
+// model answers it. It reads the SAME inputs as `run()` (focus + `#` reference chips +
+// ready attachments) through the same pure helper (`resolveSubmitTarget`), AND the same
+// agent plan (`agentSendPlanOf`), so the promise and the request cannot disagree.
 const paintComposerTarget = (): void => {
     const instance = current;
     const references = referencesOfChips(editorChips(input));
@@ -5340,7 +5377,11 @@ const paintComposerTarget = (): void => {
     const plan = agentSendPlanOf(instance, target.threadId);
     const painted = plan.commitAgent ? resolveSubmitTarget({ ...routing, focus: undefined }) : target;
 
-    composerTarget.textContent = submitTargetLabel(painted);
+    // The plan's model rides the same sentence as the destination: the reader sees WHAT
+    // answers, not only WHERE the text goes, without opening the configuration dialog. It is
+    // the model of the agent the POST runs (`plan` above), so cycling the agent chip and the
+    // label cannot disagree, and it is dropped entirely when the browser cannot name it.
+    composerTarget.textContent = submitTargetLabel(painted, plan.model);
     composerTarget.dataset.mode = painted.mode;
     // "New thread" is only worth saying when this session HAS threads to distinguish
     // from (or when a reference just turned it into a connected thread). A legacy
@@ -5386,6 +5427,25 @@ const paintComposerTarget = (): void => {
     }
 };
 
+// The single action's decoration, swapped in the SAME pass as `data-action`, `type` and
+// the accessible name, so no frame can show a stop tooltip behind a play mark: the drawn
+// triangle for submit/none, the `×` character for stop. The cross needs no optical
+// correction — it is symmetric about the box centre — and it is the ONLY figure the stop
+// state paints, because `composerStopOf` keeps the session-wide stop-all `×` out of the
+// corner whenever this control is already a stop.
+//
+// Guarded by a comparison because `paintComposer` runs on EVERY keystroke: an unguarded
+// write would re-create the child node for a figure that never changes while the state is.
+const setComposerGlyph = (action: 'submit' | 'stop'): void => {
+    if (action === 'stop') {
+        if (actionButton.textContent !== '×') actionButton.textContent = '×';
+
+        return;
+    }
+
+    if (actionButton.firstChild !== sendMark) actionButton.replaceChildren(sendMark);
+};
+
 const paintComposer = (): void => {
     const pending = running || current?.pending === true;
     // Only READY attachments count as submittable content; a still-encoding file is
@@ -5402,7 +5462,9 @@ const paintComposer = (): void => {
     const showStop = composerStopOf(action, pending);
     stopAllButton.hidden = !showStop;
     stopAllButton.disabled = !booted;
-    // Two 28px circles need the right gutter; one does not.
+    // The class that used to reserve a gutter for a second 32px circle (stop-all +
+    // send). The circles are flow children now, so nothing needs reserving; the flag
+    // stays because the running-state class is a useful read for tests and CSS.
     composer.classList.toggle('has-stop', showStop);
     // The target line follows the same paint as the action: focus changes and
     // reference chips both move it.
@@ -5415,13 +5477,13 @@ const paintComposer = (): void => {
     actionButton.type = action === 'stop' ? 'button' : 'submit';
 
     if (action === 'stop') {
-        actionButton.textContent = '×';
+        setComposerGlyph('stop');
         actionButton.setAttribute('aria-label', 'Stop the running task');
         actionButton.title = 'Stop';
         return;
     }
 
-    actionButton.textContent = '▶';
+    setComposerGlyph('submit');
     if (action === 'submit' && reading) {
         actionButton.setAttribute('aria-label', 'Send task — attachments are still loading');
         actionButton.title = 'Reading the attached file…';
@@ -8099,6 +8161,33 @@ const clearAgentSelection = (instance: Instance): void => {
 };
 
 // ---------------------------------------------------------------------------
+// The model one member actually runs (the routing line's second half)
+// ---------------------------------------------------------------------------
+
+// The EFFECTIVE model id one member runs in THIS conversation — the same resolution the
+// configuration dialog's model selects print (`agentViewOf`'s model loop), so the
+// composer's routing line can never name a model the dialog disagrees with:
+//   - a saved conversation: its own live map (`instance.sessionModels`, the value the
+//     server replaces on PATCH and the next model request reads), then the overrides it
+//     was created with (the frozen definition), then the session's own settings model;
+//   - a harness template: the stored per-agent override, else the model a new session
+//     would fall back to (`defaultSessionModel` — the typed settings model, else the
+//     server's advertised default).
+//
+// `''` means "this browser cannot say", which is what keeps the routing line honest: the
+// label then states no model instead of inventing an id.
+const agentModelOf = (instance: Instance, agent: string): string => {
+    if (agent.length === 0) return '';
+
+    const display = instance.frozen ?? instance.descriptor;
+    const model = instance.sessionId === undefined
+        ? (storedModelsOf(display, instance)[agent] ?? defaultSessionModel())
+        : (instance.sessionModels?.[agent] ?? agentModelsOf(display)[agent] ?? instance.sessionModel);
+
+    return typeof model === 'string' ? model.trim() : '';
+};
+
+// ---------------------------------------------------------------------------
 // The ONE plan a send executes (F2/F3)
 // ---------------------------------------------------------------------------
 //
@@ -8112,6 +8201,13 @@ type AgentSendPlan = {
     selected: string;
     /** True when answering this send costs the extra `POST /sessions/:id/threads`. */
     commitAgent: boolean;
+    /**
+     * The EFFECTIVE model of the agent this send actually runs, `''` when unknown.
+     * Display-only, and derived from `selected`/`commitAgent` here rather than at the
+     * call sites, so the routing line states the model of the agent the POST answers as
+     * — not whatever the chip happens to show.
+     */
+    model: string;
 };
 
 // The agent a send WOULD run with NO composer selection: the focused conversation's owner
@@ -8135,7 +8231,7 @@ const defaultAgentOf = (instance: Instance, threadId?: string): string | undefin
 // `instance === undefined` is the no-conversation paint (a harness card with nothing open):
 // no selection can exist, so the line describes the bare routing decision.
 const agentSendPlanOf = (instance: Instance | undefined, threadId?: string): AgentSendPlan => {
-    if (instance === undefined) return { selected: '', commitAgent: false };
+    if (instance === undefined) return { selected: '', commitAgent: false, model: '' };
 
     // Resolution FIRST: it can drop a selection the roster no longer carries, and a dropped
     // selection is by definition not pending any more (see `selectedAgentOf`).
@@ -8144,9 +8240,20 @@ const agentSendPlanOf = (instance: Instance | undefined, threadId?: string): Age
 
     // A send only changes the WIRE when the reader actually cycled AND the focused
     // conversation (if any) would not already run that agent.
+    const commitAgent = instance.agentSelection !== undefined && runsAs !== undefined && selected !== runsAs;
+
+    // WHO answers, and therefore which model the routing line may name: the cycled
+    // selection when the send has to mint a conversation for it (a created thread IS owned
+    // by that agent), else the focused conversation's own owner. F3: when a focused
+    // conversation's owner is not in this snapshot's roster, `runsAs` is `undefined` and the
+    // browser genuinely does not know who answers — so the model is `''` (no model printed)
+    // rather than the model of an agent that will not run this message.
+    const answersAs = commitAgent ? selected : runsAs;
+
     return {
         selected,
-        commitAgent: instance.agentSelection !== undefined && runsAs !== undefined && selected !== runsAs
+        commitAgent,
+        model: answersAs === undefined ? '' : agentModelOf(instance, answersAs)
     };
 };
 

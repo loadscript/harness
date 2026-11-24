@@ -690,14 +690,26 @@ export const resolveSubmitTarget = (options: {
 // that thread but run as a continuation turn once the active one finishes, so
 // "Steering" would promise an immediate fold-in the server will not perform
 // (attachments, or a referenced result that is not terminal yet).
-export const submitTargetLabel = (target: SubmitTarget): string => {
+//
+// `model` is the EFFECTIVE model id of the agent this send runs (main.ts
+// `agentSendPlanOf`), so the line states not only WHERE the message goes but WHAT
+// answers it — the id was previously visible only by opening the configuration
+// dialog. It is optional and display-only, exactly like `name`: a caller that cannot
+// name the model (the F3 case of an unknown conversation owner, or a host with no
+// settings model and no server default) passes `''`/omits it and the line reads
+// exactly as it did before. The id is spelled as the host states it, never shortened.
+export const submitTargetLabel = (target: SubmitTarget, model?: string): string => {
     const name = target.name ?? 'thread';
+    const typed = (model ?? '').trim();
+    const suffix = typed.length > 0 ? ` (${typed})` : '';
 
-    if (target.mode === 'steer') return target.queued === true ? `Queued in ${name}` : `Steering ${name}`;
-    if (target.mode === 'continue') return `Continuing ${name}`;
-    if (target.mode === 'connected') return 'New connected thread';
+    if (target.mode === 'steer') {
+        return `${target.queued === true ? `Queued in ${name}` : `Steering ${name}`}${suffix}`;
+    }
+    if (target.mode === 'continue') return `Continuing ${name}${suffix}`;
+    if (target.mode === 'connected') return `New connected thread${suffix}`;
 
-    return 'New thread';
+    return `New thread${suffix}`;
 };
 
 // --- display labels (R8) -----------------------------------------------------

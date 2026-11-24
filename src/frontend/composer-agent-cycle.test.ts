@@ -694,13 +694,13 @@ it('commits a cycled agent at send as one thread create plus that thread task, i
     await boot();
 
     expect(chipName()).toBe('Instruct');
-    expect(targetText()).toBe('New thread');
+    expect(targetText()).toBe('New thread (m1)');
 
     pressTab();
     expect(chipName()).toBe('Researcher');
     // Pending, not applied: the routing line names a NEW conversation, because the choice
     // has not been committed to a thread yet.
-    expect(targetText()).toBe('New thread');
+    expect(targetText()).toBe('New thread (m1)');
     expect(server.created).toEqual([]);
 
     await submit('second question');
@@ -799,14 +799,14 @@ it('drops the focused conversation when the reader picks another agent, and runs
     // conversation OWNS the next message: it continues IN1, which runs as Instruct.
     byClass('.tile[data-turn-id="turn-1"] .tile-select', 'button').click();
     await flush();
-    expect(targetText()).toBe('Continuing IN1');
+    expect(targetText()).toBe('Continuing IN1 (m1)');
 
     pressTab();
 
     // D5: selecting deliberately releases the focus — keeping it would have discarded the
     // choice silently, and a released focus is fully reversible (clicking the tile again
     // re-focuses it).
-    expect(targetText()).toBe('New thread');
+    expect(targetText()).toBe('New thread (m1)');
     expect(document.querySelector('.tile.is-expanded')).toBeNull();
     expect(chipName()).toBe('Researcher');
 
@@ -871,7 +871,7 @@ it('keeps a choice made while a send is in flight, and runs the NEXT message as 
 
     byClass('.tile[data-turn-id="turn-new-1"] .tile-select', 'button').click();
     await flush();
-    expect(targetText()).toBe('New thread');
+    expect(targetText()).toBe('New thread (m1)');
 
     // And the survivor is REAL: the next send pays for a conversation the researcher owns and
     // posts into it, rather than running as the entry agent the reader had just rejected.
@@ -913,7 +913,7 @@ it('promises the conversation the send will actually use when a choice and a foc
     await flush();
 
     const label = byClass('.composer-target', 'p');
-    expect(label.textContent).toBe('New thread');
+    expect(label.textContent).toBe('New thread (m1)');
     expect(label.dataset.mode).toBe('new');
 
     await submit('fourth question');
@@ -948,7 +948,7 @@ it('promises the continuation when the pending choice already matches the focuse
     byClass('.tile[data-turn-id="turn-1"] .tile-select', 'button').click();
     await flush();
 
-    expect(targetText()).toBe('Continuing IN1');
+    expect(targetText()).toBe('Continuing IN1 (m1)');
 
     await submit('fifth question');
 
@@ -982,6 +982,58 @@ it('continues a focused conversation the roster does not describe instead of min
 
     expect(server.created).toEqual([]);
     expect(server.tasks[0]).toEqual({ input: 'sixth question', thread_id: 'thread-9' });
+});
+
+it('names the model of the agent that answers, and follows the cycle', async () => {
+    stubMedia({ fine: true });
+    // PER-AGENT overrides, so "the model" is not one global string: `instruct` runs `m2`
+    // and the researcher runs `m3`. The session's own settings model (`m1`) is what an
+    // un-overridden member would run — no member here is un-overridden, so `m1` must not
+    // appear in the line at all.
+    const server = stubServer({
+        session: {
+            ...snapshot({
+                threads: [{ id: 'thread-1', agent: 'instruct', origin: 'host', status: 'idle', sequence: 1, label: 'IN1' }],
+                turns: [turn()]
+            }),
+            agentModels: { instruct: 'm2', research: 'm3', workspace: 'm3' }
+        }
+    });
+    localStorage.setItem(SESSION_KEY, 's1');
+
+    await boot();
+
+    // The routing line already named WHERE the message goes; the parenthetical is the other
+    // half of the promise — WHAT answers it. A new thread runs the team's entry agent, so
+    // the line states that member's model.
+    expect(chipName()).toBe('Instruct');
+    expect(targetText()).toBe('New thread (m2)');
+
+    // Cycling changes who answers, so the model changes with it. The line follows the agent
+    // the NEXT request would run, which is the same `agentSendPlanOf` the send executes.
+    pressTab();
+    expect(chipName()).toBe('Researcher');
+    expect(targetText()).toBe('New thread (m3)');
+
+    // And a continued conversation names ITS OWN agent's model, not whatever the chip
+    // currently shows: walk back to `instruct` (the cycle wraps), then open IN1, which
+    // `instruct` owns. Selection and owner agree, so nothing is committed and the line
+    // keeps naming the conversation and `m2`.
+    pressTab();
+    pressTab();
+    expect(chipAgent()).toBe('instruct');
+
+    byClass('.tile[data-turn-id="turn-1"] .tile-select', 'button').click();
+    await flush();
+
+    expect(targetText()).toBe('Continuing IN1 (m2)');
+
+    await submit('seventh question');
+
+    // The line and the request agree, and reading a model is not a write: only the task.
+    expect(server.created).toEqual([]);
+    expect(server.tasks[0]).toEqual({ input: 'seventh question', thread_id: 'thread-1' });
+    expect(server.calls.filter((call) => call.method === 'PATCH')).toEqual([]);
 });
 
 it('speaks the fallback when the choice is spent, so the region is never stale', async () => {

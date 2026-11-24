@@ -351,7 +351,7 @@ it('opens the JSON transcript and deletes a thread through the existing endpoint
     expect(document.querySelector('.tile')).toBeNull();
     expect(document.querySelector('.thread-transcript-json')).toBeNull();
     expect(document.querySelector('.dialog')).toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread (m1)');
 });
 
 it('reconciles the DELETE result even when the snapshot is stale for the watermark', async () => {
@@ -394,7 +394,7 @@ it('reconciles the DELETE result even when the snapshot is stale for the waterma
     expect(document.querySelector('.tile')).toBeNull();
     expect(document.querySelector('.dialog')).toBeNull();
     expect(document.querySelector('.thread-transcript-json')).toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread (m1)');
 });
 
 it('closes and invalidates the transcript when the session disappears during an operation', async () => {
@@ -551,7 +551,7 @@ it('deletes on ONE press with no dialog and no inline row on a desktop surface',
     // The shell reconciled the answer: the conversation and the surface it was open on are
     // gone and the composer fell back to a new thread.
     expect(document.querySelector('.tile')).toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread (m1)');
 });
 
 it('deletes on ONE press with no dialog and no inline row on a phone surface', async () => {
@@ -600,7 +600,7 @@ it('deletes on ONE press with no dialog and no inline row on a phone surface', a
     ]);
     noDialog();
     expect(document.querySelector('.tile')).toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread (m1)');
 });
 
 it('sends exactly one DELETE however often the phone reader taps', async () => {
@@ -644,7 +644,7 @@ it('sends exactly one DELETE however often the phone reader taps', async () => {
 
     await flush();
     expect(document.querySelector('.tile')).toBeNull();
-    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread');
+    expect(document.querySelector('.composer-target')?.textContent).toBe('New thread (m1)');
 });
 
 

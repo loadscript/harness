@@ -376,7 +376,19 @@ it('paints the single in-field action for every state and never renders old cont
     expect(action.dataset.action).toBe('submit');
     expect(action.type).toBe('submit');
     expect(action.disabled).toBe(false);
-    expect(action.textContent).toBe('▶');
+    // The submit figure is a DRAWN play mark, not the `▶` character the control used to
+    // paint: a text glyph is centered by its EM BOX, which is what made the triangle read
+    // off-centre inside the circle. So the button holds exactly one decorative child, and
+    // its accessible name is still the `aria-label` below. The path's three vertices are
+    // (7.5,4), (7.5,20) and (21,12) — centroid (12,12), the viewBox centre — which is the
+    // optical centering a right-pointing triangle needs and what no font can promise.
+    expect(action.textContent).toBe('');
+    expect([...action.children].map((child) => child.getAttribute('class'))).toEqual([
+        'composer-action-glyph'
+    ]);
+    const sendMark = action.querySelector('svg.composer-action-glyph');
+    expect(sendMark?.getAttribute('aria-hidden')).toBe('true');
+    expect(sendMark?.querySelector('path')?.getAttribute('d')).toBe('M7.5 4v16L21 12z');
     expect(action.getAttribute('aria-label')).toBe('Send task');
     // T1/R2: on a hardware-keyboard device the title advertises the real shortcut —
     // a bare Enter sends.
@@ -393,7 +405,10 @@ it('paints the single in-field action for every state and never renders old cont
     expect(action.dataset.action).toBe('stop');
     expect(action.type).toBe('button');
     expect(action.disabled).toBe(false);
+    // The stop figure is the text `×`, and the swap is a real swap: the play mark is gone,
+    // so no frame shows a stop tooltip behind a play triangle.
     expect(action.textContent).toBe('×');
+    expect(action.querySelector('svg')).toBeNull();
     expect(action.getAttribute('aria-label')).toBe('Stop the running task');
     expect(action.title).toBe('Stop');
     // Still one ACTION: the control changed meaning, not identity (the attach
@@ -405,7 +420,9 @@ it('paints the single in-field action for every state and never renders old cont
     input.dispatchEvent(new Event('input', { bubbles: true }));
     expect(action.dataset.action).toBe('submit');
     expect(action.disabled).toBe(false);
-    expect(action.textContent).toBe('▶');
+    // Back to the drawn mark: the same node, re-mounted by the state change.
+    expect(action.textContent).toBe('');
+    expect(action.querySelector('svg.composer-action-glyph')).not.toBeNull();
 
     // WHITESPACE + RUNNING is still empty: it must keep the stop X, not offer a
     // submit that run() would refuse.

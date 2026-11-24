@@ -77,9 +77,24 @@ it('keeps the send action and the agent control INSIDE one field frame', () => {
     expect(action).not.toContain('bottom: 8px');
     expect(action).toContain('display: inline-flex');
     expect(action).toContain('flex: 0 0 auto');
-    expect(action).toContain('width: 28px');
-    expect(action).toContain('height: 28px');
+    // The circle is one control line — 32px, the SAME figure as the text column's
+    // one-line content box and the agent pill — so the send button got bigger without
+    // making the idle composer taller than one input line.
+    expect(action).toContain('width: 32px');
+    expect(action).toContain('height: 32px');
     expect(action).toContain('border-radius: 999px');
+
+    // The play mark is a DRAWN figure (main.ts `createSendMark`), not a typed character:
+    // flex centering centers a text glyph's EM BOX, and a `▶` character's own bearing and
+    // baseline therefore moved the triangle inside the circle depending on the host's font.
+    // The mark is sized as a figure, and follows the circle's ink through `currentColor`.
+    const glyph = blockOf('.composer-action-glyph {');
+    expect(glyph).toContain('display: block');
+    expect(glyph).toContain('width: 20px');
+    expect(glyph).toContain('height: 20px');
+    expect(glyph).toContain('fill: currentColor');
+    expect(glyph).toContain('stroke: currentColor');
+    expect(glyph).toContain('stroke-linejoin: round');
 
     // Hidden is a real removal (idle + empty has NO action), not just opacity.
     const hidden = blockOf('.composer-action[hidden] {');
@@ -89,6 +104,12 @@ it('keeps the send action and the agent control INSIDE one field frame', () => {
     const stop = blockOf(".composer-action[data-action='stop'] {");
     expect(stop).toContain('background: transparent');
     expect(stop).toContain('border-color: var(--border-strong)');
+
+    // The session-wide stop-all `×` is the SAME circle: the two controls share one
+    // corner, and a different diameter between them would read as a mistake.
+    const stopAll = blockOf('.composer-stop {');
+    expect(stopAll).toContain('width: 32px');
+    expect(stopAll).toContain('height: 32px');
 
     // Keyboard users get a visible focus ring on the dark input.
     const focus = blockOf('.composer-action:focus-visible {');

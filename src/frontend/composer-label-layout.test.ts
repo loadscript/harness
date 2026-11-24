@@ -155,7 +155,7 @@ it('floats the routing label on the frame and puts the agent button on its left'
 
     const label = byClass('.composer-target', 'p');
     expect(label.id).toBe('composer-target');
-    expect(label.textContent).toBe('New thread');
+    expect(label.textContent).toBe('New thread (m1)');
     expect(label.hidden).toBe(false);
     // The frame reserves the notch padding only while the label is painted.
     expect(field.dataset.target).toBe('true');
@@ -189,7 +189,7 @@ it('hides the label and its notch padding when a session has nothing to distingu
 
     // R15: no label row and no reserved notch => the idle frame is one input line.
     expect(label.hidden).toBe(true);
-    expect(label.textContent).toBe('New thread');
+    expect(label.textContent).toBe('New thread (m1)');
     expect(field.dataset.target).toBe('false');
     // A description that pointed at a display:none node would be dropped by AT; the
     // attribute is removed instead so the field's accessible name is just its label.
@@ -298,6 +298,13 @@ it('styles the routing line as a notched label and reserves space only when pain
     expect(label).toContain('transform: translateY(-50%)');
     expect(label).toContain('background: var(--bg-bar)');
     expect(label).toContain('pointer-events: none');
+    // The label also names the model now, which makes it long enough to reach the frame's
+    // right edge. The box is clamped between the measured `left` (inline, Issue B) and
+    // this inset, and `fit-content` means it hugs the text while never exceeding that
+    // clamp — so a long model id ellipsizes INSIDE the frame instead of printing over its
+    // border, which is what a static `max-width` alone could not do once `left` grew.
+    expect(label).toContain('right: 10px');
+    expect(label).toContain('width: fit-content');
     // The old separate row (margin/gap above the field) is gone.
     expect(label).not.toContain('margin: 0 0 4px');
     expect(label).not.toContain('line-height: 1.4');
@@ -319,7 +326,8 @@ it('makes the left agent button seamless and keeps the right control row compact
     expect(button).toContain('border-radius: var(--radius-sm)');
     expect(button).toContain('max-width: 180px');
 
-    // R15: the right row's padding no longer exceeds the text's own 32px line box,
-    // so stop/send do not make the idle frame taller than one input line.
-    expect(blockOf('.composer-controls {')).toContain('padding: 2px 2px 2px 0');
+    // R15: the right row carries NO vertical padding, so the two 32px circles sit on
+    // exactly the text's own 32px line box and stop/send never make the idle frame
+    // taller than one input line.
+    expect(blockOf('.composer-controls {')).toContain('padding: 0 2px 0 0');
 });

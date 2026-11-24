@@ -6867,10 +6867,12 @@ body.is-resizing-rail {
     gap: 6px;
     flex: 0 0 auto;
     /* R15 (T7): the row holds only stop/send now (the agent button moved to the left
-       edge, R16). A 2px edge inset keeps the 28px controls on the same 32px content
-       line as the text field instead of adding 4px of dead height above and below —
-       that padding was part of why the idle composer read as a tall blank box. */
-    padding: 2px 2px 2px 0;
+       edge, R16). The inset is HORIZONTAL only, and that is the whole compactness rule:
+       the two circles are 32px, exactly the text column's one-line content box, so the
+       idle composer stays one input line tall. The 2px of VERTICAL padding this rule used
+       to carry is what made a 28px circle reach that same 32px line — and read as dead
+       height above and below an empty field. */
+    padding: 0 2px 0 0;
 }
 
 .composer-input {
@@ -7110,23 +7112,47 @@ body.is-resizing-rail {
    without adding layout weight. */
 /* R10/R11 (T5): the action is a FLOW child of `.composer-controls`, so it lives
    inside the frame border at every width instead of being anchored over the text.
-   The circle keeps its old size/colour. */
+   32px (was 28): a send button is the one control every message passes through, and
+   at 28px the mark inside it read as a speck. 32 is the number this sheet already
+   treats as one control line — the text column's line box and the agent pill are both
+   32 — so the bigger circle costs the composer NO extra height (see
+   `.composer-controls`' padding). The `font-size` now only sizes the stop state's `×`. */
 .composer-action {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     border: 1px solid transparent;
     border-radius: 999px;
     background: var(--accent);
     color: #0b0d12;
     font-family: var(--sans);
-    font-size: 12px;
+    font-size: 15px;
     line-height: 1;
     cursor: pointer;
+}
+
+/* The play mark main.ts draws (`createSendMark`), which replaces the `▶` text glyph this
+   control used to paint as a 12px character. `currentColor` is what makes the mark follow
+   the circle's own ink — the dark cut-out on the accent fill, and whatever a forced-colors
+   mode puts there — the same trick `.info-icon` and `.dialog-copy-icon` use for their marks.
+   Those two are stroke-only; this one is FILLED, because a solid play triangle is what the
+   reader recognises at this size, and it carries the same round-join vocabulary on top of the
+   fill so the 60-degree apex is not jagged at 20px.
+   The box is square and the path's centroid sits on the viewBox centre, so the flex
+   centering of `.composer-action` has nothing left to correct — which is the whole point of
+   drawing the mark instead of typing it. */
+.composer-action-glyph {
+    display: block;
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
 }
 
 /* `hidden` must win over the flex display above (the button is removed from the
@@ -7650,11 +7676,11 @@ body.is-resizing-rail {
 
     /* R10: the control row keeps its buttons on one line by default; at very narrow
        widths it may wrap INSIDE the frame rather than pushing send out of it.
-       R15 (T7): the phone row uses the same 2px edge inset as desktop so the idle
-       composer stays one input line tall at 360px too. */
+       R15 (T7): the phone row uses the same inset rule as desktop — horizontal only —
+       so the idle composer stays one input line tall at 360px too. */
     .composer-controls {
         gap: 4px;
-        padding: 2px 1px 2px 0;
+        padding: 0 1px 0 0;
     }
 
     /* The list stays one full-width column on a phone: only the spacing and the
@@ -8056,21 +8082,25 @@ body.is-resizing-rail {
 /* Separate STOP-ALL control (R5/R7). It sits LEFT of the inline action so the
    submit/send affordance never moves, and it exists only while work is pending
    and the inline action is not already a stop. Flow child of
-   `.composer-controls` (T5 R10) so it is inside the frame too. */
+   `.composer-controls` (T5 R10) so it is inside the frame too.
+   32px + 15px font, the same figures as `.composer-action`: the two circles share a
+   corner, so a size difference between them would read as a mistake rather than a
+   hierarchy (only the send circle can carry the filled accent, and that is the
+   hierarchy). */
 .composer-stop {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     border: 1px solid var(--border-strong);
     border-radius: 999px;
     background: transparent;
     color: var(--text);
     font-family: var(--sans);
-    font-size: 12px;
+    font-size: 15px;
     line-height: 1;
     cursor: pointer;
 }
@@ -8120,6 +8150,14 @@ body.is-resizing-rail {
        host without layout (jsdom) or a composer that is `display: none` at paint time
        falls back to, and it is the floor the inline measurement never goes below. */
     left: 10px;
+    /* The other clamp of the same box. The label is short when it only routes ("New
+       thread") and long enough to reach this edge once it also names the model
+       ("New thread (vultr/ds4)"), and `left` is a MEASUREMENT, so a static `max-width`
+       alone can leave the text running past the frame's border. `right` + `fit-content`
+       is the pair that fixes it: the box hugs its text, is capped by the space between
+       the measured `left` and this inset, and therefore ellipsizes inside the frame. */
+    right: 10px;
+    width: fit-content;
     z-index: 1;
     max-width: calc(100% - 20px);
     margin: 0;

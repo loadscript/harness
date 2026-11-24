@@ -387,7 +387,7 @@ it('opens a new unfocused submit as an independent RR4 conversation', async () =
     unfocus.click();
     await flush();
     // The visible statement of "unfocused": the routing line offers a new thread.
-    expect(byClass('.composer-target', 'p').textContent).toBe('New thread');
+    expect(byClass('.composer-target', 'p').textContent).toBe('New thread (m1)');
     composerSubmit('new conversation');
     await flush();
     await flush();
@@ -523,5 +523,5 @@ it('keeps a focused CHILD follow-up inside that child card', async () => {
     ).toEqual([['thread-child', 'child follow-up']]);
     expect(exchanges[0].querySelector('.agent-text')?.textContent).toBe('child answer\n');
     // Focus stays on the child conversation it continued.
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing HL1');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing HL1 (m1)');
 });

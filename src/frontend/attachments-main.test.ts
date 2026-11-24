@@ -409,7 +409,7 @@ it('labels a running focused thread as queued once a ready attachment exists', a
     byClass('.tile .tile-select', 'button').click();
 
     const target = byClass('.composer-target', 'p');
-    expect(target.textContent).toBe('Steering Running');
+    expect(target.textContent).toBe('Steering Running (m1)');
 
     const input = byClass('.composer-input', 'textarea');
     input.value = 'look ';
@@ -417,12 +417,12 @@ it('labels a running focused thread as queued once a ready attachment exists', a
     pasteFiles(input, [new File([PNG_BYTES], 'shot.png', { type: 'image/png' })]);
 
     // A still-reading file cannot be submitted, so it must not change the promise.
-    expect(target.textContent).toBe('Steering Running');
+    expect(target.textContent).toBe('Steering Running (m1)');
 
     await flush();
 
     // Ready bytes: the submit is a queued continuation, not a steer.
-    expect(target.textContent).toBe('Queued in Running');
+    expect(target.textContent).toBe('Queued in Running (m1)');
     expect(target.dataset.mode).toBe('steer');
 
     submit();

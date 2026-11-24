@@ -344,7 +344,7 @@ it('renders the roster, and continues the thread the reader focused with threadI
     // routing line names before anything is typed.
     await openThread('turn-2');
     expect(tileOf('turn-2').classList.contains('is-expanded')).toBe(true);
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Writing');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Writing (m1)');
 
     const input = byClass('.composer-input', 'div');
     input.textContent = 'next step';
@@ -371,19 +371,19 @@ it('submits without a threadId when nothing is focused (new thread)', async () =
     // the test is about. The reader's expand-then-collapse round trip lands in the same
     // place, which is what the rest of the walk pins.
     expect(tileOf('turn-1').classList.contains('is-expanded')).toBe(false);
-    expect(byClass('.composer-target', 'p').textContent).toBe('New thread');
+    expect(byClass('.composer-target', 'p').textContent).toBe('New thread (m1)');
 
     // Opening the conversation makes it the steering target…
     await openThread('turn-1');
     expect(tileOf('turn-1').classList.contains('is-expanded')).toBe(true);
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Writing');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Writing (m1)');
 
     // …and clicking the header of the ALREADY-expanded tile collapses it: that is the
     // explicit unfocus (ui/turns.ts `collapse` sets `explicitUnfocus`).
     selectOf('turn-1').click();
     await flush();
     expect(tileOf('turn-1').classList.contains('is-expanded')).toBe(false);
-    expect(byClass('.composer-target', 'p').textContent).toBe('New thread');
+    expect(byClass('.composer-target', 'p').textContent).toBe('New thread (m1)');
 
     const input = byClass('.composer-input', 'div');
     input.textContent = 'brand new';
@@ -425,7 +425,7 @@ it('never resurrects a deleted thread from a late snapshot, turn or event (S3)',
     // Focus is thread-1 (the expanded turn) before the deletion. The roster's only
     // visible effect is the tile's conversation badge: the strip that used to list
     // `thread-1`/`thread-child` as rows no longer exists.
-    expect(byClass('.composer-target', 'p').textContent).toBe('Steering IT1');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Steering IT1 (m1)');
     expect(document.querySelector('.thread-strip')).toBeNull();
     expect(tileOf('turn-1').dataset.threadId).toBe('thread-1');
     expect(tileOf('turn-1').getAttribute('data-thread-id')).toBe('thread-1');
@@ -450,7 +450,7 @@ it('never resurrects a deleted thread from a late snapshot, turn or event (S3)',
     expect(document.querySelectorAll('.conversation')).toHaveLength(0);
     expect(document.querySelectorAll('.thread-strip-row')).toHaveLength(0);
     // The authoritative deletion cleared the steering target.
-    expect(byClass('.composer-target', 'p').textContent).toBe('New thread');
+    expect(byClass('.composer-target', 'p').textContent).toBe('New thread (m1)');
 
     // A LATE snapshot captured before the deletion (older `updatedAt`, so stale by
     // the watermark): the deleted thread and its turn must stay gone.
@@ -461,7 +461,7 @@ it('never resurrects a deleted thread from a late snapshot, turn or event (S3)',
     expect(document.querySelectorAll('.tile')).toHaveLength(0);
     expect(document.querySelectorAll('.conversation')).toHaveLength(0);
     expect(document.querySelectorAll('.thread-strip-row')).toHaveLength(0);
-    expect(byClass('.composer-target', 'p').textContent).toBe('New thread');
+    expect(byClass('.composer-target', 'p').textContent).toBe('New thread (m1)');
 
     // A LATE turn upsert for the deleted turn.
     stub.emit({ type: 'turn', turn: initial.turns[0] });
@@ -473,7 +473,7 @@ it('never resurrects a deleted thread from a late snapshot, turn or event (S3)',
     stub.emit({ type: 'event', turnId: 'turn-1', event: { type: 'text', agent: 'instruct', delta: 'late' } });
     await flush();
     expect(document.querySelectorAll('.tile')).toHaveLength(0);
-    expect(byClass('.composer-target', 'p').textContent).toBe('New thread');
+    expect(byClass('.composer-target', 'p').textContent).toBe('New thread (m1)');
 });
 
 it('steers a child conversation from its nested invocation row (S2)', async () => {
@@ -516,7 +516,7 @@ it('steers a child conversation from its nested invocation row (S2)', async () =
 
     // The composer targets the CHILD's persistent id, and the child conversation is
     // the one expanded surface (the parent tile body is closed).
-    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Child');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Continuing Child (m1)');
     expect(document.querySelector<HTMLElement>('.tile')?.classList.contains('is-expanded')).toBe(false);
     expect(row?.classList.contains('is-expanded')).toBe(true);
 
@@ -543,7 +543,7 @@ it('steers a running focused thread and keeps exactly one conversation row', asy
 
     // T21 R22: the running conversation is open because the reader opened it.
     await openThread('turn-1');
-    expect(byClass('.composer-target', 'p').textContent).toBe('Steering Running');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Steering Running (m1)');
 
     const input = byClass('.composer-input', 'div');
     input.textContent = 'change direction';
@@ -589,7 +589,7 @@ it('labels a running focus with an unfinished reference as queued, keeping the s
     await flush();
     expect(tileOf('turn-1').classList.contains('is-expanded')).toBe(true);
     expect(tileOf('turn-2').classList.contains('is-expanded')).toBe(false);
-    expect(byClass('.composer-target', 'p').textContent).toBe('Steering Running');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Steering Running (m1)');
 
     const input = byClass('.composer-input', 'div');
     const { editorInsertChips } = await import('./ui/editor');
@@ -601,7 +601,7 @@ it('labels a running focus with an unfinished reference as queued, keeping the s
 
     // The line no longer promises an immediate steer: this submit is a continuation
     // turn queued behind the active one.
-    expect(byClass('.composer-target', 'p').textContent).toBe('Queued in Running');
+    expect(byClass('.composer-target', 'p').textContent).toBe('Queued in Running (m1)');
     expect(byClass('.composer-target', 'p').dataset.mode).toBe('steer');
 
     byClass('.composer', 'form').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
