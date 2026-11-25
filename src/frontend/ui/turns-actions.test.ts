@@ -315,7 +315,16 @@ describe('fork / autoanswer branch rows', () => {
         expect(row.querySelector('.thread-kind')?.textContent).toBe('fork');
         expect(row.querySelector('.thread-preview')?.textContent).toBe('fork of this thread');
         // The block uses the existing agent label allocator, never a raw agent id.
-        expect(row.querySelector('.thread-name')?.textContent).toBe('WR2');
+        //
+        // F6 (2026-11-25, deliberate expectation change): the code is `T?`
+        // (`UNKNOWN_THREAD_LABEL`), not `WR2`. A threadFork branch can never BE a durable
+        // conversation, so the ordinal the allocator used to burn for it was an address nothing
+        // answered to — the shared projection says the same for this run
+        // (`UNADDRESSABLE_BLOCK_LABEL`, ../../shared/agent-results.ts:630-661), and ui/turns.ts
+        // `mintThreadLabel` now agrees; the writer's own root row still keeps `WR1`, and the
+        // freed number goes to the next run that CAN own one
+        // (ui/turns-thread-unaddressed-labels.test.ts). Still never a raw agent id.
+        expect(row.querySelector('.thread-name')?.textContent).toBe('T?');
         expect(row.textContent).not.toContain('writer');
 
         // The branch's own first event carries thread.id = branchId and must reuse
@@ -365,7 +374,12 @@ describe('fork / autoanswer branch rows', () => {
         expect(row.querySelector<HTMLElement>('.thread-kind')?.dataset.kind).toBe('autoanswer');
         expect(row.querySelector('.thread-preview')?.textContent).toBe('automatic owner answer');
         // The owner fork runs as the owner agent (writer), not the requester (helper).
-        expect(row.querySelector('.thread-name')?.textContent).toBe('WR2');
+        // F6 (2026-11-25, deliberate expectation change): its code is `T?` — an
+        // `autoanswer` branch owns no durable conversation either, so it takes no ordinal from
+        // the writer sequence (see the fork case above, and ../../shared/agent-results.ts:630-661
+        // for the rule this mirrors). The agent IDENTITY is still writer's: the row's colour and
+        // `data-agent` come from `branch.agent`, which is what "runs as the owner agent" means.
+        expect(row.querySelector('.thread-name')?.textContent).toBe('T?');
 
         turn.apply({
             type: 'branch_end',

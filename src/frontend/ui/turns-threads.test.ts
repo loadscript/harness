@@ -692,16 +692,23 @@ describe('invocation thread entries', () => {
         failed.setState('error', 'boom');
 
         // A delegation cancelled before its child ever started is resolved by the
-        // root's terminal status, not left as a forever-queued row. Labels are
-        // conversation-scoped, so this second helper thread is HR2 — the first tile's
-        // helper keeps HR1 (no duplicate thread labels, R5/R6).
+        // root's terminal status, not left as a forever-queued row.
+        //
+        // F6 (2026-11-25, deliberate expectation change): the row now reads `T?`
+        // (`UNKNOWN_THREAD_LABEL`), NOT `HR2`. A turn that has settled with a placeholder
+        // whose child NEVER started is not a run, so it owns no addressable label — the
+        // client twin of the end-of-turn sweep in ../../shared/agent-results.ts:845-869, whose
+        // projection of this SAME record says `label: 'T?'` for `call:d2`. The number that was
+        // tentatively taken is refunded to the board (no gap, no phantom `#HR2`), which is why
+        // the R5/R6 "labels continue across tiles" claim below is untouched for a row that
+        // really ran: the FIRST tile's helper still keeps `HR1`.
         expect(threadRows(failed).map(project)).toEqual([
             {
                 id: 'call:d2',
                 depth: '1',
                 agent: 'helper',
                 state: 'error',
-                name: 'HR2',
+                name: 'T?',
                 status: 'error',
                 preview: 'queued task',
                 text: undefined,
@@ -884,7 +891,15 @@ describe('invocation thread entries', () => {
         board.adopt(record);
 
         expect(board.blocks()).toEqual(listAgentResultBlocks([record]));
-        expect(board.blocks().map((block) => block.label)).toEqual(['WR1', 'WR2']);
+        // F6 (2026-11-25, deliberate expectation change): the branch row is `T?`, not `WR2`.
+        // A threadFork branch can never BE a durable conversation, so the ordinal this tile
+        // used to burn for it was an address nothing answered to — the user's `IT13 … have no
+        // label`, and one half of the duplicate `RR9`. The shared projection of this SAME
+        // record says `['WR1', 'T?']` (../../shared/agent-results.ts:630-661,
+        // `reserveLabel: false` for a branch run), and the line above pins that the client now
+        // agrees with it; the writer's own root label is unaffected, and the freed `WR2` is
+        // available to the next run that CAN own one.
+        expect(board.blocks().map((block) => block.label)).toEqual(['WR1', 'T?']);
     });
 
     it('attaches an unknown or self parent at depth 1 instead of throwing', () => {

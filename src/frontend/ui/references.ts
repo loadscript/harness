@@ -28,6 +28,9 @@
 //   - main.ts          — popup, debounced `glob` lookup, submit references
 
 import type { InlineChip } from './editor';
+// F6: the ONE label parser (`normalizeAgentLabel` → `AGENT_REFERENCE_LABEL_PATTERN`), shared
+// with the server's block doors — see `isReferenceableBlock` for why the gate belongs here.
+import { agentLabelParts } from '../../shared';
 import type { AgentResultBlock } from '../../shared';
 
 // One block a user can reference. This is EXACTLY the shared descriptor
@@ -41,8 +44,21 @@ export type AgentBlockDescriptor = AgentResultBlock;
 
 // Referenceable statuses: completed answers and work still in progress. A failed
 // or cancelled block has no usable result and must not be offered in the picker.
-export const isReferenceableBlock = (block: Pick<AgentBlockDescriptor, 'status'>): boolean =>
-    block.status === 'done' || block.status === 'running' || block.status === 'queued';
+//
+// F6 (2026-11-25) — and it must own an ADDRESS. A block whose label is
+// `UNADDRESSABLE_BLOCK_LABEL` (`T?`, ../../shared/agent-results.ts:270) — a threadFork branch
+// run, or a `delegate` placeholder whose child never started — carries a label that
+// deliberately fails `AGENT_REFERENCE_LABEL_PATTERN` (`/^[A-Z]{2}\d+$/`), so no door can
+// resolve it: a run whose identity is unknown cannot be bound as a `#` reference even though
+// its status looks referenceable. Without this gate the composer offers `#T?`, its chip
+// serializes into `SubmitTaskRequest.references`, and the server's
+// `readAgentResultReferenceList` (../../shared/agent-results.ts) rejects the WHOLE request
+// with a 400 — one unaddressable chip would sink a message that also carries real references.
+// `agentLabelParts` is the SAME parser every label door uses (`normalizeAgentLabel` →
+// `findAgentResultBlock` → that reader), so this filter cannot drift from the server's rule.
+export const isReferenceableBlock = (block: Pick<AgentBlockDescriptor, 'status' | 'label'>): boolean =>
+    (block.status === 'done' || block.status === 'running' || block.status === 'queued') &&
+    agentLabelParts(block.label) !== undefined;
 
 // Wire contract (T4): SubmitTaskRequest.references and SessionTurn.references.
 // `threadId` undefined means the turn's root block.

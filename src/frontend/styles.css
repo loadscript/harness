@@ -3642,6 +3642,28 @@ body.is-resizing-rail {
     visibility: hidden;
 }
 
+/* F4 (issue D, "some threads have no label"): the code comes back when it is the row's ONLY
+   identity. The rule above withdraws a repeated/exchange conversation code on purpose — the
+   card above already prints it, and the slot stays reserved so the text columns line up — and
+   that is right for a row that can still say something else about itself: a task preview, a
+   clock, a token tally. It is the wrong trade for an EXPANDED row that states
+   `data-figures='none'` (no clock, no tally, see the `.thread-status-text` rule at :3902) and
+   whose preview line the expansion hid: there the withdrawal leaves the header with NOTHING
+   readable, which is the reported defect, while the one-name-per-conversation design the
+   withdrawal protects only ever protects a legible row.
+   `visibility`, never `display`/`hidden` — the same reason the rule above gives twice: an
+   attribute-hidden node collapses the row's flex slot and shifts `.thread-preview` out of
+   column. The element always held its text (`ui/turns.ts` keeps one writer and never clears
+   it), so restoring legibility is one declaration.
+   Collapsed rows are NOT in this rule: with the body closed, the preview line still carries
+   the task, so the row is legible and the repetition the rule above removes is real. */
+.thread-row.is-expanded[data-figures='none']:is([data-thread-repeat], [data-thread-exchange])
+    > .thread-tile
+    > .thread-select
+    > .thread-name {
+    visibility: visible;
+}
+
 .conversation .turn-row[data-child-thread] {
     /* A child conversation WITHOUT its own invocation card stays NESTED inside the
        owning conversation; only user-created threads are top-level. */
@@ -3851,6 +3873,39 @@ body.is-resizing-rail {
     overflow: hidden;
     clip-path: inset(50%);
     white-space: nowrap;
+}
+
+/* F4 (issue D, user-reported: "some threads have no label, like IT13, IT15 … some are
+   EMPTY in total"): the state word becomes the row's only figure when the row has none.
+   `ui/turns.ts` stamps `data-figures='none'` on a `.thread-row` whose measurement line
+   cannot paint anything — both labels are `[hidden]`, and `[hidden] { display: none
+   !important }` (:124) removes them from the line entirely — which is the honest state for
+   a section whose wire carried no `startedAt`/`endedAt` and no `latestInput`/`cachedInput`.
+   Everything else the compact header could show is withdrawn in that state by rules of its
+   own: the repeated code (`[data-thread-repeat]`/`[data-thread-exchange]`, :3640), the
+   preview while expanded (:4382 and the `data-thread-preview` rule at :4399), and this word.
+   The row then renders an empty band with a border, which reads as a rendering FAILURE
+   rather than as "this run recorded no clock and no tally".
+   WHY THE WORD AND NOT A FABRICATED FIGURE: the state is the one figure the wire DOES
+   always carry (`TurnSection.state`, and `queued`/`streaming`/`done`/`error`/`cancelled`
+   come from the projector, never from a client-side clock), so printing it states a recorded
+   fact. A `0ms` or a `0` beside it would be an invented measurement, which the whole
+   measurement line exists to avoid. The colour mapping above already paints this box
+   (`--ok`/`--warn`/`--danger`/`--muted`), so the word also carries the state colour the line
+   would have carried.
+   SCOPE, deliberately narrow: a `.thread-row` only. The turn tile's own header keeps the word
+   clipped because a tile always has its prompt line to identify it, and a thread row is the
+   only block whose identity half can be withdrawn by another rule. The words it can spell are
+   the five `STATE_TEXT` names, all short; the line still shrinks and ellipsises
+   (`.thread-top` keeps `min-width: 0`, :3844), and the preview is still the only item that
+   truncates first. */
+.thread-row[data-figures='none'] .thread-status-text {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    clip-path: none;
+    overflow: visible;
 }
 
 /* State colours (R4/T2). The state WORD is now clipped to screen-reader-only in both
@@ -4326,6 +4381,23 @@ body.is-resizing-rail {
    duplicate it. */
 .thread-row.is-expanded .thread-preview {
     display: none;
+}
+
+/* F4 (issue D): …UNLESS the body has no task block to duplicate. The rule above exists for
+   one reason, stated on it: the expanded body renders the task as Markdown. That premise is
+   a fact about the row, not about the state — `renderThreadPrompt` is the only writer of
+   `.thread-prompt`, and a row whose task text never arrived (no roster row claimed the run)
+   has NO body block at all. Expanding one of those used to delete the last readable thing it
+   had: no prompt below, no preview above, the code withdrawn (:3640), the state word clipped
+   (:3866) and both figure labels `[hidden]` (:124) — a border with nothing in it, which reads
+   as a broken card rather than as "this run has no recorded task text".
+   `ui/turns.ts` stamps `data-thread-preview='true'` from the SAME `options.input` the preview
+   text is built from, and clears it the moment a `.thread-prompt` block is created, so the
+   duplication rule keeps governing every row that does have prose in its body — including a
+   row whose text arrives later (the roster claim, or `syncCompiledThreadTasks` recovering the
+   spawning call's brief). */
+.thread-row.is-expanded[data-thread-preview='true'] .thread-preview {
+    display: block;
 }
 
 /* Collapsed entries keep ONLY the header: the body is display:none, exactly like
@@ -8008,6 +8080,30 @@ body.is-resizing-rail {
 .thread-kind[data-kind='autoanswer'] {
     border-color: var(--warn);
     color: var(--warn);
+}
+
+/* F10 (R10.5) — the identity a `T?` row DOES have. A run that owns no conversation reads
+   `T?` in the name slot (`.thread-name`), and that is the honest answer: the row has no
+   ADDRESS. It is not, however, an unidentified row — the record still names its branch
+   (`branch-5`) or its run (`inv-7`) — so that figure gets its own badge instead of being
+   written into the address slot, where a fabricated `IT13` used to sit and resolve to nothing.
+   Deliberately NOT the agent-hue channel (`.thread-name`/`.tile-thread` own that): this is a
+   record identifier, so it uses the neutral pill vocabulary of `.thread-kind`/`.tool-duration`,
+   keeps `flex: 0 0 auto` so it can never steal width from the preview, and is created only when
+   there is something to say (`paintEntryIdentity`), so a normal row keeps the exact DOM and row
+   width it had before. */
+.thread-runid {
+    order: 0;
+    flex: 0 0 auto;
+    padding: 0 5px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    line-height: 1.5;
+    white-space: nowrap;
 }
 
 @media (forced-colors: active) {

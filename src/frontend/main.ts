@@ -1693,9 +1693,14 @@ const PRESETS: Readonly<Record<string, readonly ToolPreset[]>> = {
     // minted by an earlier `add`) carries an obviously fake placeholder instead of an
     // invented real-looking id: the reader edits it, and the label says so.
     // ---------------------------------------------------------------------------
-    // No properties at all: the button names what the call returns, which is still more
-    // useful than the reader guessing that an empty object is the whole request.
-    toolList: [{ label: 'Full inventory', value: {} }],
+    // Paging is optional in every direction: `{}` is the default 10-row page of names
+    // AND descriptions (which is also the schema-derived fallback, so it is offered
+    // once), and `fields: "name"` is the whole roster in one page. Both buttons name
+    // what the call returns, and neither invents a cursor.
+    toolList: [
+        { label: 'Full inventory', value: {} },
+        { label: 'Names only', value: { fields: 'name' } }
+    ],
     // `operation` is the one required property, and 'read' is registered in every
     // harness, so the target of these three is a name the playground can resolve.
     toolManage: [

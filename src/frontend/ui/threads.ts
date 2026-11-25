@@ -574,6 +574,26 @@ export const threadLabelOf = (
     return entry === undefined ? UNKNOWN_THREAD_LABEL : threadNameOf(entry);
 };
 
+// F10 / R10.5 — the record's BETTER IDENTITY for a row whose name cannot be an address.
+//
+// A run that owns no conversation reads `T?` (`UNKNOWN_THREAD_LABEL`), which is honest but
+// tells the reader nothing about WHICH run that was — the reviewer measured a dozen such rows
+// on one turn of the operator's session, "some are empty in total". This helper answers the
+// narrow question "what is the best id this record actually holds for this row", and the tile
+// paints it as a separate badge so the address slot (`T?`) is never faked into looking like a
+// mintable ordinal:
+//   1. `branchId` — the recorded `threadFork` branch (`branch-5`); a branch run is exactly the
+//      case that can never own an address, and this is the one figure that names it;
+//   2. `invocationId` — the runtime run id, when the caller has one and there is no branch;
+//   3. nothing at all → undefined, and the caller renders NO badge (never an empty pill).
+// Deliberately NOT the persistent `threadId` of a branch: on the operator's session the three
+// `branch-N` sections all carry the PARENT's `threadId` (`thread-52`), so showing it would
+// suggest the branch IS that conversation — the mislabelling R10.4 is about.
+export const threadIdentityOf = (identity: {
+    branchId?: string;
+    invocationId?: string;
+}): string | undefined => nonEmptyString(identity.branchId) ?? nonEmptyString(identity.invocationId);
+
 // Hover/accessible detail for a tile badge. Includes the AGENT (S6: two threads of
 // the same agent must be distinguishable) plus the full opaque id.
 export const threadTitleOf = (

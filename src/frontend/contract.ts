@@ -106,8 +106,8 @@ export const HARNESS_CORE_TOOL_NAMES = [
 // Keys follow the wire names, because that is what a caller can look a tool up by.
 export const HARNESS_CORE_TOOL_DESCRIPTIONS: Readonly<Record<string, string>> = {
     toolRequest: 'Find tools by capability tag and enable them for this chat.',
-    toolList: 'List every registered tool by name and description.',
-    toolManage: 'Inspect and edit registered tools: details, source, path, create, update, reload.',
+    toolList: 'List registered tools by name and description, a budgeted page at a time (`offset`/`limit`, or `fields: "name"` for the whole roster).',
+    toolManage: 'Inspect and edit registered tools: paged list, details, source, path, create, update, reload.',
     toolCreate: 'Add a small session-local tool when the catalogue cannot help.',
     tasks: 'Read, add, patch, or remove the task list for this chat.',
     records: 'The one session store: any collection, batch writes, revisions, and define.',

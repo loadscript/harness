@@ -99,7 +99,23 @@ const TOOLS: readonly ToolDescriptor[] = [
             limit: ints({ minimum: 1, maximum: 100 })
         })
     },
-    { name: 'toolList', group: 'Core tools', description: 'Inventory.', tags: ['tools'], visibility: 'core', sessionBound: true, parameters: object({}) },
+    // F2: the inventory is PAGED. The fixture mirrors the real schema exactly
+    // (src/engine/tools/runtime/toolList.tool.ts) — paging keys declared, unknown keys
+    // still refused — because a preset the schema rejects is worse than no preset, and
+    // `{}` has to stay legal: it is the default page.
+    {
+        name: 'toolList',
+        group: 'Core tools',
+        description: 'Inventory.',
+        tags: ['tools'],
+        visibility: 'core',
+        sessionBound: true,
+        parameters: object({
+            offset: ints({ minimum: 0 }),
+            limit: ints({ minimum: 1, maximum: 100 }),
+            fields: { type: 'string', enum: ['name', 'name+description'], default: 'name+description' }
+        })
+    },
     {
         name: 'toolManage',
         group: 'Core tools',
@@ -126,7 +142,12 @@ const TOOLS: readonly ToolDescriptor[] = [
                 dependencies: {
                     type: 'array',
                     items: object({ path: str(), text: str() }, ['path', 'text'])
-                }
+                },
+                // F2: `operation: "list"` pages (the details rows carry each tool's whole
+                // schema, so the un-paged answer is the largest tool result in the
+                // runtime group). Optional, and inert for every other operation.
+                offset: ints({ minimum: 0 }),
+                limit: ints({ minimum: 1, maximum: 100 })
             },
             ['operation']
         )
@@ -263,9 +284,11 @@ const TOOLS: readonly ToolDescriptor[] = [
 // threadList, gitDiff), which is why those lists are shorter.
 const EXPECTED_PRESETS: Record<string, readonly string[]> = {
     // The `{}` read is BOTH the curated first payload and the schema-derived fallback,
-    // so it is offered once (the dedupe below), and the four buttons are the whole set.
+    // so it is offered once (the dedupe below). `fields: "name"` is the second button:
+    // it is the projection that answers "what exists" for a whole registry in one
+    // budgeted page, which is the point of the F2 paging parameters.
     tasks: ['Current tasks', 'Add a task', 'Complete a task (edit id)', 'Remove a task (edit id)'],
-    toolList: ['Full inventory'],
+    toolList: ['Full inventory', 'Names only'],
     toolManage: ['List registered', 'Details for read', 'Source of read'],
     toolRegistry: ['Install shoutText (body)', 'Empty call'],
     toolCancel: ['Cancel a call (edit id)', 'Only callId'],

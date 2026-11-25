@@ -259,7 +259,15 @@ import { createAgentLabels } from './agent-label';
 // in its allocator (root `turn.threadLabel` and child `threadLabels[id]`), so a
 // same-code fallback invocation continues AFTER it (`RR1` + child `RR2`) instead of
 // re-minting `RR1`. The board must consume the SAME parser and reservation rule.
-import { agentLabelParts } from '../../shared';
+// F10 (R10.2) also reads `agentCodeOf` there: reclaiming a retracted ordinal needs the code this
+// agent's labels are minted under BEFORE any number is burned, so the reclaimed number is
+// guaranteed to be one the allocator would have produced anyway.
+import { agentCodeOf, agentLabelParts } from '../../shared';
+// F6 (2026-11-25): `T?` — the identity of a run that owns NO addressable label. The shared
+// projection spells it `UNADDRESSABLE_BLOCK_LABEL` (../../shared/agent-results.ts:270) and
+// names THIS module's constant as the origin of that text, so the transcript, the roster
+// strip and the block descriptor keep one unknown shape.
+import type { AgentLabelParts } from '../../shared';
 import type { AgentBlockDescriptor } from './references';
 // R5: the shared accessible Copy affordance (icon + success/error feedback + the
 // insecure-origin clipboard fallback that keeps an open dialog's focus trap alive).
@@ -283,11 +291,15 @@ import {
     invalidThreadsOf,
     revivedThreadIdsOf,
     rosterDeletionsOf,
+    threadIdentityOf,
     threadLabelOf,
     threadNameOf,
     threadTitleOf,
     turnThreadIdOf,
-    turnThreadLabelOf
+    turnThreadLabelOf,
+    // F6: the text a row shows when its run owns no addressable identity (a threadFork branch,
+    // or a `delegate` placeholder whose child never started). See `mintThreadLabel`.
+    UNKNOWN_THREAD_LABEL
 } from './threads';
 import type { SessionThreadEntry } from './threads';
 
@@ -848,6 +860,130 @@ const newestSectionStampOf = (display: TurnDisplay): number | undefined => {
     return newest;
 };
 
+// --- F4: the spawning call block as the source of a delegated task ----------
+//
+// WHY IT EXISTS (issue D, "some threads are empty in total"): a COMPILED child row has
+// exactly one documented source of its task text — the compact roster's bounded
+// `SessionThreadView.preview`, joined by `rosterClaimOf` (see `compiledEntryOf`). When no
+// roster row claims the run (a `branch-*` fork, a conversation whose ledger row the
+// retention ring already evicted, or a run the roster never named), the row keeps the
+// literal 'delegated task' and its collapsed line says nothing about what that run was
+// asked to do.
+//
+// THE TILE DOES HOLD THE TEXT: the parent section's recorded `delegate`/`threadFork` call
+// is one of its `DisplayStep` nodes, and `DisplayStep.argsPreview` is the provider's own
+// argument string. The raw event plane already reads that same evidence for the same
+// purpose (`delegateOf`, inside the `appendTool` handler), so this is the compiled plane
+// reaching the same figure through the same door — NO wire change and no new field.
+//
+// WHAT THIS ADDS OVER `delegateOf`: the projector bounds and flattens the preview
+// (`DISPLAY_ARGS_PREVIEW_CHARS` = 200, ../server/turn-projector.ts `previewArguments`), so
+// a task longer than the bound arrives as TRUNCATED JSON and `JSON.parse` fails. The field
+// scan below recovers the `input` value on its own and returns exactly the recorded PREFIX
+// of the task — the row's own line re-bounds it at `plainPreview(input, 160)` anyway — so
+// nothing here reconstructs or invents text. A `\u` cut in half at the bound is dropped too.
+//
+// THE JOIN: `TurnSection` names the spawning section (`parentSectionId`) and the child's
+// `agent`, and `DisplayStep.name`/`argsPreview` name the call. A call is attributed to a
+// child only when the pairing is forced by the data (exactly one call naming that agent,
+// or an equal-length sequence in which both sides hold the same position) — see
+// `delegationTaskOf`. Anything looser would be a guess between two sibling delegations.
+const DELEGATION_CALL_NAMES = new Set(['delegate', 'threadFork']);
+
+// The line a compiled child row shows when NOTHING in the record names its task. Two
+// writers read it: `createThread` (the collapsed preview line) and
+// `syncCompiledThreadTasks` (which is only allowed to replace THIS text).
+const DELEGATED_TASK_PREVIEW = 'delegated task';
+
+// One JSON string field out of a possibly-TRUNCATED argument object: `"key"`, its colon,
+// the value's opening quote, then every character up to the first UNESCAPED closing quote.
+// A bounded preview has no closing quote — that is the case this exists for — and the
+// prefix it does hold is still recorded text. Escapes decode only as far as the recorded
+// bytes state them; a backslash cut in half at the bound is dropped with the bound.
+const jsonFieldOf = (raw: string, key: string): string | undefined => {
+    const keyAt = raw.indexOf(`"${key}"`);
+    if (keyAt < 0) return undefined;
+
+    const colon = raw.indexOf(':', keyAt + key.length + 2);
+    if (colon < 0) return undefined;
+
+    const open = raw.indexOf('"', colon + 1);
+    if (open < 0) return undefined;
+
+    let out = '';
+
+    for (let index = open + 1; index < raw.length; index += 1) {
+        const char = raw[index] as string;
+
+        // An unescaped quote closes the value: the whole recorded string.
+        if (char === '"') return out.length === 0 ? undefined : out;
+
+        if (char !== '\\') {
+            out += char;
+            continue;
+        }
+
+        const next = raw[index + 1];
+
+        // A backslash at the very end of the preview is half an escape, not a character.
+        if (next === undefined) return out.length === 0 ? undefined : out;
+
+        index += 1;
+
+        if (next === 'u') {
+            const hex = raw.slice(index + 1, index + 5);
+
+            // A `\u` whose four digits were cut off is not recorded text either.
+            if (!/^[0-9a-fA-F]{4}$/.test(hex)) return out.length === 0 ? undefined : out;
+
+            out += String.fromCharCode(parseInt(hex, 16));
+            index += 4;
+            continue;
+        }
+
+        // `\n`, `\t`, `\r`, `\b`, `\f`, `\"`, `\\`, `\/`: the escape names one character.
+        out +=
+            next === 'n'
+                ? '\n'
+                : next === 't'
+                  ? '\t'
+                  : next === 'r'
+                    ? '\r'
+                    : next === 'b'
+                      ? '\b'
+                      : next === 'f'
+                        ? '\f'
+                        : next;
+    }
+
+    return out.length === 0 ? undefined : out;
+};
+
+// The `{agent, input}` a recorded call's argument string carries, whole-object first
+// (the raw plane's rule, verbatim) and field-by-field only when the preview is too
+// truncated to parse. Both halves are optional: a `threadFork` call has no `agent`, and
+// a call whose `input` the model never finished writing has neither.
+const callArgsOf = (raw: string): { agent?: string; input?: string } => {
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+
+        if (parsed !== null && typeof parsed === 'object') {
+            const source = parsed as { agent?: unknown; input?: unknown };
+            const agent = typeof source.agent === 'string' && source.agent.length > 0 ? source.agent : undefined;
+            const input = typeof source.input === 'string' && source.input.length > 0 ? source.input : undefined;
+
+            return { ...(agent === undefined ? {} : { agent }), ...(input === undefined ? {} : { input }) };
+        }
+    } catch {
+        // Bounded preview: not valid JSON. The scan below is the documented fallback.
+    }
+
+    const agent = jsonFieldOf(raw, 'agent');
+    const input = jsonFieldOf(raw, 'input');
+
+    return { ...(agent === undefined ? {} : { agent }), ...(input === undefined ? {} : { input }) };
+};
+
 // --- T4: the tool-composition line -----------------------------------------
 //
 // WHY IT EXISTS: the transport yields NOTHING while the model writes a tool block
@@ -1082,12 +1218,29 @@ const createBlockMeta = (
     // time-derived line that lives SOMEWHERE ELSE in the header (the tile's quiet-state
     // meta note) re-derives on the SAME clock instead of needing a second timer. A child
     // row passes nothing: only the tile header owns that note.
-    onPaint?: () => void
+    onPaint?: () => void,
+    // F4 (issue D, "some threads are empty in total"): called after every paint that can
+    // CHANGE the visibility of the two figure labels, with what is on screen. A section
+    // whose wire carried no `startedAt`/`endedAt` and no `latestInput`/`cachedInput` hides
+    // BOTH labels (`paint`/`paintTokens` set `hidden`, and `[hidden] { display: none }`,
+    // styles.css:124), which leaves the measurement line printing nothing at all; the row
+    // owner then has to be able to say so, so this is the only way a caller learns the
+    // figure state without re-reading the DOM. `createThread` uses it to stamp
+    // `data-figures='none'`, which `styles.css` answers by making the state word visible.
+    onFigures?: (figures: { elapsed: boolean; tokens: boolean }) => void
 ): BlockMeta => {
     const elapsed = el('span', classes.elapsed);
     elapsed.hidden = true;
     const tokens = el('span', classes.tokens);
     tokens.hidden = true;
+
+    // The one reporter of the figure state (see `onFigures`). Called unconditionally at
+    // the end of both painters rather than only on a change: the writer it feeds is a
+    // idempotent data stamp, and "always report" cannot drift the way an edge-triggered
+    // report can when a caller subscribes after the last change.
+    const reportFigures = (): void => {
+        onFigures?.({ elapsed: !elapsed.hidden, tokens: !tokens.hidden });
+    };
 
     // Timing baseline. `endedAt` undefined means "no end known"; the label is then
     // either LIVE (read `startedAt → now`, gated by `nowAllowed`) or UNAVAILABLE and
@@ -1138,7 +1291,9 @@ const createBlockMeta = (
         elapsed.textContent = span === undefined ? '' : formatDuration(span);
         elapsed.hidden = span === undefined;
 
-        // T3: one clock, two time-derived labels (see `createBlockMeta`).
+        // F4: the clock's visibility just moved, so re-report the figure pair.
+        reportFigures();
+
         // T3: one clock, two time-derived labels (see `createBlockMeta`).
         onPaint?.();
     };
@@ -1175,6 +1330,10 @@ const createBlockMeta = (
 
         tokens.textContent = text;
         tokens.hidden = text.length === 0;
+
+        // F4: the tally's visibility just moved — report BEFORE the title branch, which
+        // returns early on an empty figure and would otherwise skip the report.
+        reportFigures();
 
         if (text.length === 0) {
             tokens.removeAttribute('title');
@@ -1685,6 +1844,14 @@ type ThreadEntry = {
     // Fork/autoanswer rows also carry their branch identity for branch_end.
     kind: 'delegation' | 'fork' | 'autoanswer' | undefined;
     branchId: string | undefined;
+    // F6 (2026-11-25): the per-agent ordinal THIS tile minted for this entry, kept only while
+    // the minted number is STILL what the row displays. It is what makes a fabricated number
+    // refundable: a label that came from a roster join or the display wire
+    // (`paintEntryLabel`) is an authoritative conversation name and clears this field, so
+    // `retractEntryLabel` can never overwrite one with `UNKNOWN_THREAD_LABEL`, and
+    // `retireOrdinal` only ever hands back a number this tile actually burned. Undefined for a
+    // row that never minted (an exchange row, a branch row, a row named by the server).
+    mintedOrdinal?: AgentLabelParts;
     // T-W10 — the PROCESS that minted this row's invocation id (`HarnessThread.epoch`,
     // ../../types/index.ts:3042; the server folds the same field at
     // ../../server/turn-projector.ts `isEpochBoundary`). `thread.id` is a per-process
@@ -1698,6 +1865,24 @@ type ThreadEntry = {
     // Tiny header tag (`fork` / `auto`), created only for a branch kind. It is a
     // narrow label, not the removed oversized role badge (R3).
     kindTag: HTMLElement | undefined;
+    /**
+     * F10 (R10.1) — the row was built from a COMPILED wire section (`compiledEntryOf`), i.e.
+     * every identity figure on it ARRIVES from the server (`TurnSection.agentLabel`,
+     * `threadId`, `invocationId`, `branchId`). Such a row may NEVER burn a local ordinal: the
+     * tile has no authority to name a run the server chose not to name, and the number it
+     * fabricated (`IT13`, `WE1`) was simultaneously unaddressable (no BY reference resolves it)
+     * and durable (the shared projection fed it into `labelHighWater`). Absent = the row is the
+     * raw/live plane's own, which keeps the minting rule it has always had.
+     */
+    compiled?: boolean;
+    /**
+     * F10 (R10.5) — the badge that states the record's BETTER identity (`branch-5`, `inv-7`)
+     * while the row's NAME is not an address (`T?`). Created lazily by `paintEntryIdentity`, so
+     * a row with an addressable code keeps the exact DOM it had before this field existed; the
+     * name slot itself never changes (`T?` stays `T?`), which is what keeps the badge from
+     * reading like a mintable ordinal.
+     */
+    identity?: HTMLElement;
     started: boolean;
     state: ThreadState;
     section: AgentSection;
@@ -1770,6 +1955,48 @@ type ThreadEntry = {
 // Root invocation key. It never collides with a runtime id because it is not a
 // wire value; the map keys are otherwise the runtime ids or synthesized keys.
 const ROOT_KEY = 'root';
+
+// F6 (2026-11-25) — the client twin of the server's branch test
+// (../../shared/agent-results.ts:630 `isBranchRun`, whose own source is the engine's
+// ../underload/harness/src/engine/shared/agent-results.ts). A threadFork branch run can never
+// BE a durable conversation: no conversation record is persisted for it and the store's
+// run→conversation join never holds it, so the ordinal minted for one is an ADDRESS nothing
+// answers to — the user's "IT13 … have no label", and the duplicate `RR9` F6 measured.
+// The same four spellings of that fact on the wire decide it here: an explicit `branchId`,
+// a `fork`/`autoanswer` kind, or an invocation id the runtime minted as `branch-N`.
+//
+// WHY THE ROOT AND THE FLAT LEGACY SECTION ARE NOT BRANCHES: the shared projection gives the
+// turn's own root block a label unconditionally (../../shared/agent-results.ts:569 passes no
+// `reserveLabel` option) — a turn's root IS a conversation — and a threadless legacy stream
+// (`inline:<agent>`, :585) is a real run with real content that keeps its number.
+const isBranchRun = (kind: string | undefined, branchId: string | undefined, explicitId: string | undefined): boolean =>
+    branchId !== undefined || kind === 'fork' || kind === 'autoanswer' || explicitId?.startsWith('branch-') === true;
+
+// F10 (2026-11-26, R10.4) — does a recorded result text name THIS run, as a complete id?
+//
+// The runtime's invocation ids are short numeric strings (`68`) and the conversation ids are
+// `thread-53`, so a bare `includes` is worthless: `68` also appears inside `"thread-680"`,
+// `"limit":3068`, or another child's envelope. Measured on the operator's own turn, the loose
+// test matched 4–11 calls per child (it "proved" a brief for every row); the exact-token test
+// below matched exactly the one call whose result envelope carries
+// `"invocationId":"68","threadId":"thread-53"`, and correctly matched NOTHING for a child whose
+// spawning call failed a guardrail and therefore never named an id.
+//
+// Two spellings count, because the recorded preview is either a JSON envelope or a plain
+// sentence: a quoted field value (`"thread-53"`), or a bare id delimited by characters that
+// cannot be part of an id (`thread-53 exceeded its timeout` / `branch "branch-3"`).
+// A complete id is one delimited by characters that cannot be part of an id. The class is
+// pre-escaped ONCE (`[^0-9A-Za-z_"-]` covers both sides: a quote, whitespace, punctuation or the
+// start/end of the string), so the only per-call work is escaping the id itself.
+const ID_BOUNDARY_BEFORE = '(?:^|[^0-9A-Za-z_-])';
+const ID_BOUNDARY_AFTER = '(?:$|[^0-9A-Za-z_-])';
+const ID_ESCAPES = /[.*+?^${}()|[\]\\]/g;
+
+const stepNamesId = (text: string, id: string): boolean => {
+    if (id.length === 0) return false;
+
+    return new RegExp(`${ID_BOUNDARY_BEFORE}${id.replace(ID_ESCAPES, '\\$&')}${ID_BOUNDARY_AFTER}`).test(text);
+};
 
 // T12d F1: one steer audit entry has a stable render key across local event-order
 // rendering, the board's cross-turn pass, and a rebuilt projection. It is stored on
@@ -2108,6 +2335,53 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
     // restarting at `RR1`. Cleared with the board, because the numbering is a
     // function of the recorded turn order (a reload rebuilds the same sequence).
     const labelCounters = new Map<string, number>();
+    // F6 (2026-11-25): the per-code floor below which `labelCounters` may never go back.
+    // It is the highest number any tile has seen on an AUTHORITATIVE conversation label
+    // (`turn.threadLabel`, a roster child label, or the display wire's `section.agentLabel`) —
+    // an identity the client did not fabricate and therefore cannot refund. A tile gives a
+    // placeholder's tentative number back when the turn settles (see the tile's
+    // `retireOrdinal`); without this floor, a REPLAYED tile's server-recorded label
+    // (`RR1`, painted without raising a counter that already reads `RR1`) could be re-minted
+    // by a later live tile and put two visible rows on one name.
+    const labelFloors = new Map<string, number>();
+    // F10 (2026-11-26, R10.2): the per-code ordinals this board has HANDED BACK through
+    // `retireOrdinal`, newest first, together with the tile that freed each one. A settle sweep
+    // retracts a never-started placeholder's tentative number (`RR9` → `T?`) and lowers the
+    // counter; if that child's own `start` frame then lands late (a restart, a late
+    // `thread` record, a poll that delivered the roster before the child's transcript), the row
+    // must not be left nameless, and it must not take a FRESH number either — the tile's
+    // allocator is monotone, so a fresh mint put the row at `RR10` and left a hole at `RR9`,
+    // which the reviewer measured as "the retraction over-shoots after the turn settled". The
+    // map is BOARD-scoped like the counters: the freed number belongs to the conversation
+    // numbering, not to the tile that happened to free it, and `reinstateEntryLabel` has to be
+    // able to prove nobody else is wearing it. An entry is dropped as soon as it is reused, and
+    // a number any row currently displays is never reused (see `ordinalIsFree`).
+    const retractedOrdinals = new Map<string, number[]>();
+    // F10 (R10.2) support: every per-code ordinal this board currently has on SCREEN, painted by
+    // ANY tile, maintained by `paintEntryLabel` (the single writer of a row's name). It is what
+    // lets `reinstateEntryLabel` prove a freed number is actually free across tiles — the tile's
+    // own `tileHighWaterOf` cannot see another tile's rows, and two rows on one name is the one
+    // outcome this rule may never produce.
+    const displayedOrdinals = new Map<string, Set<number>>();
+    // The ledger's only writer: a row stopped wearing `previous` and started wearing `label`.
+    // BOTH label sites report here — `paintEntryLabel` (every repaint) and `createThread`, which
+    // builds the row around its first label and never calls the repaint helper. Reporting only
+    // the repaints is what let a minted number look free while another tile's row was showing it.
+    // Un-registration is unconditional: `previous` is often a label no row holds any more, and
+    // deleting it is then a no-op.
+    const wearOrdinal = (previous: string | undefined, label: string): void => {
+        const freed = agentLabelParts(previous);
+
+        if (freed !== undefined) displayedOrdinals.get(freed.code)?.delete(freed.ordinal);
+
+        const worn = agentLabelParts(label);
+        if (worn === undefined) return;
+
+        const worn_ordinals = displayedOrdinals.get(worn.code) ?? new Set<number>();
+
+        worn_ordinals.add(worn.ordinal);
+        displayedOrdinals.set(worn.code, worn_ordinals);
+    };
     // R20: the LIVE rank lookup, from `TurnBoardOptions.ranks`. A name the map omits —
     // or a value that is not one of the 26 letters — states NO rank, so the section
     // carries no `data-rank` rather than an invented 'A'. Compiled sections never ask:
@@ -3228,8 +3502,19 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
         //    with sequential exchanges instead of gaining a sibling tile under its
         //    owner. Guarded against a card that lives inside THIS tile: appending the
         //    row into its own subtree would tear the DOM apart.
+        //    F10: the node that must not contain the target is `row`, not `turn.element`.
+        //    The handle's element is the `.tile` and the row wrapper is its PARENT, so a
+        //    child card created by this very tile sits at `tile > thread-body >
+        //    thread-flow` — i.e. OUTSIDE `turn.element` but INSIDE `row`. The old test
+        //    therefore passed for exactly the tiles that own the card and jsdom threw
+        //    `HierarchyRequestError: The operation would yield an incorrect node tree`
+        //    while appending the row into its own descendant (measured on the operator's
+        //    session `Temp/agenttools/snapshot/session.json`, turn `caaa372e…`, where a
+        //    `branch-5` continuation is routed to the `thread-52` card that row holds);
+        //    one throw aborted the whole reconcile, which is why that turn painted
+        //    nothing at all.
         const exchange = threadId === undefined ? undefined : childExchangeHost(threadId);
-        if (exchange !== undefined && !turn.element.contains(exchange)) {
+        if (exchange !== undefined && !row.contains(exchange)) {
             if (row.parentElement !== exchange) exchange.append(row);
             delete row.dataset.childThread;
             row.dataset.threadExchange = threadId;
@@ -4663,6 +4948,12 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
         // afterwards continue the sequence.
         const labels = createAgentLabels();
         let labelSeed: Map<string, number> | undefined;
+        // F6 (2026-11-25): the values THIS tile wrote into the board counters, per code.
+        // `retireOrdinal` may lower a counter only while this tile still OWNS its high-water
+        // (`labelCounters.get(code) === publishedLabels.get(code)`). Every publish strictly
+        // raises, so equality is exactly the test "no later tile has published a number above
+        // this one" — and a number another tile is displaying must never come back into use.
+        const publishedLabels = new Map<string, number>();
         // A REPLAYED turn may arrive with the counters the server recorded at its
         // start (snapshot `labelSeeds`). That recorded base is authoritative: seeding
         // from the surviving board counters instead would renumber this turn after an
@@ -4671,6 +4962,19 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             labelSeed = new Map(Object.entries(initialLabelSeed));
             labels.seed(labelSeed);
         }
+
+        // Publish this tile's allocator state into the board counters, recording what it
+        // wrote (see `publishedLabels`). Shared by every mint and every reservation so the
+        // ownership bookkeeping has exactly one writer.
+        const publishLabels = (): void => {
+            for (const [code, used] of labels.counters()) {
+                if (used <= (labelCounters.get(code) ?? 0)) continue;
+
+                labelCounters.set(code, used);
+                publishedLabels.set(code, used);
+            }
+        };
+
         const nextLabel = (agent: string | undefined): string => {
             // First allocation of THIS tile: freeze the base it continues from.
             if (labelSeed === undefined) {
@@ -4680,9 +4984,7 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
 
             const label = labels.next(agent);
 
-            for (const [code, used] of labels.counters()) {
-                if (used > (labelCounters.get(code) ?? 0)) labelCounters.set(code, used);
-            }
+            publishLabels();
 
             return label;
         };
@@ -4701,11 +5003,205 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
 
             labels.seed(new Map([[parts.code, parts.ordinal]]));
 
+            // F6: an authoritative conversation name also FLOORS the board counter for its
+            // code. It may already be at or above that number (so the publish below changes
+            // nothing), but a later refund must never walk back under it.
+            if (parts.ordinal > (labelFloors.get(parts.code) ?? 0)) labelFloors.set(parts.code, parts.ordinal);
+
             // Publish the reservation so LATER tiles (and a rebuilt projection)
             // continue after it instead of re-minting the same number.
-            for (const [code, used] of labels.counters()) {
-                if (used > (labelCounters.get(code) ?? 0)) labelCounters.set(code, used);
+            publishLabels();
+        };
+
+        // THE ONE VOCABULARY FOR A FALLBACK IDENTITY (all three mint sites: a thread row,
+        // the root section, and the flat legacy section). It answers the F6 question BEFORE
+        // an ordinal is burned:
+        //   - a COMPILED row (`options.compiled`, F10/R10.1) consumes NOTHING and reads
+        //     `UNKNOWN_THREAD_LABEL`: its identity is server-authored by contract, and a run the
+        //     server left unnamed is a run no client ordinal may name;
+        //   - a BRANCH RUN owns no addressable label, so it consumes NOTHING from the
+        //     per-agent sequence and reads `UNKNOWN_THREAD_LABEL` — the client twin of the
+        //     server's `reserveLabel: false` (../../shared/agent-results.ts:541-548, 659-661);
+        //   - anything else mints the next ordinal, and the caller keeps the minted parts on
+        //     the entry (`mintedOrdinal`) so the number can be refunded if the row turns out
+        //     not to be a run at all (see `retractEntryLabel`).
+        // Returning the parts (rather than a bare string) is what makes the refund exact: a
+        // row that was never given a number has nothing to hand back.
+        const mintThreadLabel = (options: {
+            agent: string | undefined;
+            // A run that can never become a durable conversation (see `isBranchRun`).
+            branch?: boolean;
+            // F10 (R10.1): a row whose identity the server owns (a compiled wire section). It
+            // is checked BEFORE `branch` because it is the stronger statement — a compiled row
+            // mints nothing whatever its shape, so `retractEntryLabel`/`retireOrdinal` never
+            // have anything to refund on a replayed turn, and `tileHighWaterOf` (the twin of
+            // the server's `collectAgentLabelCounters`) never sees a fabricated number.
+            compiled?: boolean;
+        }): { label: string; minted?: AgentLabelParts } => {
+            if (options.compiled === true || options.branch === true) return { label: UNKNOWN_THREAD_LABEL };
+
+            const label = nextLabel(options.agent);
+
+            // `nextLabel` always produces `<CODE><ordinal>`, so this parse cannot fail; the
+            // guard just keeps a caller from trusting a number it cannot name.
+            const minted = agentLabelParts(label);
+
+            return minted === undefined ? { label } : { label, minted };
+        };
+
+        // The highest ordinal of one code that THIS tile still shows: its seed base, the
+        // board-wide floor of server-recorded conversation labels, and every label currently
+        // painted on its entries. This is the client twin of the server's
+        // `collectAgentLabelCounters` (../server/sessions.ts `mergeLabelHighWater`): the
+        // counters come from the labels on screen, so a row reading `UNKNOWN_THREAD_LABEL`
+        // — which never parses into `AgentLabelParts` — reserves nothing.
+        const tileHighWaterOf = (code: string): number => {
+            let high = Math.max(labelSeed?.get(code) ?? 0, labelFloors.get(code) ?? 0);
+
+            for (const entry of threads.values()) {
+                const parts = agentLabelParts(entry.label);
+                if (parts === undefined || parts.code !== code || parts.ordinal <= high) continue;
+
+                high = parts.ordinal;
             }
+
+            return high;
+        };
+
+        // F6: hand one fabricated ordinal back to the board, so a number that is no longer
+        // displayed anywhere on this tile does not leave a gap the reader reads as a broken
+        // label (`RR1`, `T?`, `RR3`). Called AFTER the row's label changed, because
+        // `tileHighWaterOf` reads what is on screen. The tile's OWN allocator keeps its
+        // high-water (`seed` only raises): a row minted after a refund continues AFTER the
+        // freed number rather than reusing it, which can never put two visible rows on one
+        // name.
+        const retireOrdinal = (code: string): void => {
+            const owned = publishedLabels.get(code);
+            const current = labelCounters.get(code) ?? 0;
+            if (owned === undefined || owned !== current) return;
+
+            const target = tileHighWaterOf(code);
+            if (target >= current) return;
+
+            labelCounters.set(code, target);
+            publishedLabels.set(code, target);
+        };
+
+        // THE retraction: a row whose run owns no addressable identity gives up the number
+        // this tile minted for it. `paintEntryLabel` stays the single writer of the row text,
+        // its `.agent-name` head and `entry.label`.
+        //
+        // Only a mint THIS tile made is refundable — a label that arrived from a roster join
+        // or from the display wire is an authoritative conversation name and keeps its row
+        // (`mintedOrdinal` is cleared when such a label is painted).
+        const retractEntryLabel = (entry: ThreadEntry): void => {
+            const minted = entry.mintedOrdinal;
+            if (minted === undefined) return;
+
+            entry.mintedOrdinal = undefined;
+            paintEntryLabel(entry, UNKNOWN_THREAD_LABEL);
+            retireOrdinal(minted.code);
+            // F10 (R10.2): remember the exact number, so a row that LATER becomes addressable
+            // (its child's frame lands after the settle sweep) can take ITS OWN number back
+            // instead of a fresh one. Recorded after the refund because `retireOrdinal` is what
+            // makes the number actually free.
+            recordRetiredOrdinal(minted);
+        };
+
+        // F10 (R10.2) — the ledger of numbers this board has handed back (see
+        // `retractedOrdinals`). Newest first, and capped: an ordinal freed long before a late
+        // frame can arrive is historical, and a long session must not keep an unbounded list.
+        const RETIRED_ORDINALS_PER_CODE = 8;
+
+        const recordRetiredOrdinal = (parts: AgentLabelParts): void => {
+            const freed = retractedOrdinals.get(parts.code) ?? [];
+
+            if (freed[0] === parts.ordinal) return;
+
+            freed.unshift(parts.ordinal);
+            if (freed.length > RETIRED_ORDINALS_PER_CODE) freed.length = RETIRED_ORDINALS_PER_CODE;
+            retractedOrdinals.set(parts.code, freed);
+        };
+
+        // F10 (R10.2) — is one ordinal provably free? Three independent facts must all hold,
+        // because putting two visible rows on one name is the failure this whole fold is built
+        // to prevent, and an address that resolves to two blocks is worse than `T?`:
+        //   1. no AUTHORITATIVE conversation label on this board reaches it — `labelFloors` is
+        //      the highest server-recorded name per code (`turn.threadLabel`, a roster child
+        //      label, `section.agentLabel`) and is a one-way floor precisely because such a
+        //      name can reappear on a replayed tile at any time;
+        //   2. no row on ANY tile of this board currently displays it (`displayedOrdinals`,
+        //      maintained by `paintEntryLabel`, the single writer of a row's name);
+        //   3. this tile's own high water is below it — the seed it continues from, its board
+        //      floors and every label it paints (the twin of the server's
+        //      `collectAgentLabelCounters`), which also covers a number the tile re-minted for a
+        //      newer row while it sat freed.
+        const ordinalIsFree = (code: string, ordinal: number): boolean => {
+            if (ordinal <= (labelFloors.get(code) ?? 0)) return false;
+            if (displayedOrdinals.get(code)?.has(ordinal) === true) return false;
+
+            return ordinal > tileHighWaterOf(code);
+        };
+
+        // F10 (R10.2) — THE reinstatement, called when a retracted row turns out to be a real
+        // run after all (a `delegate` placeholder that settled un-started and then adopted its
+        // child's identity: `adoptPlaceholder`). The settle sweep already lowered the counter,
+        // and the tile allocator only ever RAISES, so doing nothing here has two wrong answers:
+        // leave the row on `T?` when it is now addressable, or mint a FRESH number and leave a
+        // hole in the middle of the numbering (the reviewer's over-retraction: `RR9` retracted,
+        // the late child then shown at `RR10`). Reuse the freed ordinal exactly when
+        // `ordinalIsFree` proves it is free, and only then — otherwise fall through to the
+        // normal mint, which can never collide.
+        //
+        // A row the roster already names returns before this is ever reached
+        // (`adoptPlaceholder` repaints it through `paintPersistentMarkers`), so a conversation
+        // never trades its real name for a recycled number.
+        const reinstateEntryLabel = (entry: ThreadEntry): void => {
+            if (entry.callId === undefined) return;
+            if (entry.mintedOrdinal !== undefined) return;
+            if (agentLabelParts(entry.label) !== undefined) return;
+            // A branch run owns no address whatever its shape (R10.1) — reinstating a number
+            // onto it would put back the fabricated address F10 removed.
+            if (isBranchRun(entry.kind, entry.branchId, entry.explicitId)) return;
+
+            const code = entry.agent === undefined ? undefined : agentCodeOf(entry.agent);
+            if (code === undefined) return;
+
+            const freed = retractedOrdinals.get(code);
+            const reusable = freed?.find((ordinal) => ordinalIsFree(code, ordinal));
+            let label: string;
+            let minted: AgentLabelParts | undefined;
+
+            if (reusable !== undefined) {
+                // Consume the ledger entry FIRST: once a row wears the number it is no longer a
+                // candidate, and a second claim on the same ordinal must go to the mint, not here.
+                freed?.splice(freed.indexOf(reusable), 1);
+
+                // The tile's allocator continues AFTER the number it just handed out, the same way
+                // `retireOrdinal` walks it back: `labelCounters` is the highest ordinal IN USE, so
+                // a row wearing `RR9` leaves the counter at 9 and the next run reads `RR10`. Raising
+                // it to `reusable + 1` here was off by one and left a hole at `RR10`.
+                if (reusable > (labelCounters.get(code) ?? 0)) labelCounters.set(code, reusable);
+                if (reusable > (publishedLabels.get(code) ?? 0)) publishedLabels.set(code, reusable);
+
+                minted = { code, ordinal: reusable, label: `${code}${reusable}` };
+                label = minted.label;
+            } else {
+                // Every freed number for this code is already worn by a row the operator can see
+                // (the reviewer's `RR9` case: another tile claimed it while this row was
+                // retracted). The row IS a run now, so leaving it on `T?` would state something
+                // false, and this is the one place the reviewer's `RR9` → `RR10` display is the
+                // RIGHT answer: mint the next free ordinal. `nextLabel` continues from this tile's
+                // high water, so the mint cannot collide, and keeping `mintedOrdinal` leaves the
+                // number refundable if the row turns out not to be a run after all.
+                const fresh = mintThreadLabel({ agent: entry.agent });
+
+                label = fresh.label;
+                minted = fresh.minted;
+            }
+
+            entry.mintedOrdinal = minted;
+            paintEntryLabel(entry, label);
         };
 
         // One entry per INVOCATION in this turn. The map is keyed by the canonical
@@ -4959,6 +5455,41 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                     // its block clock at the local observation (R1). A recorded child
                     // keeps its last painted span.
                     if (entry.meta !== undefined) entry.meta.finish(undefined, entry.meta.recorded());
+                }
+
+                // F6 (2026-11-25) — THE END-OF-TURN SWEEP, the client twin of
+                // ../../shared/agent-results.ts:845-869. A `delegate` placeholder whose child
+                // NEVER STARTED is not a run at all: the parent made the call, this tile holds
+                // no child frames, and the only thing that settled the call is the parent's own
+                // `tool_result` or the turn ending. Such a row keeps the honest unknown identity
+                // instead of the ordinal it tentatively took, so it cannot be typed as `#IT13`,
+                // cannot shadow a conversation's name, and — via `retireOrdinal` — does not leave
+                // the board's numbering with a gap the reader reads as a broken label.
+                //
+                // WHY ONLY HERE (the same argument the shared projection records): while the
+                // turn is `queued`/`running` the child may still start and adopt a conversation
+                // label, and a composer chip can legitimately bind the pending block by its
+                // tentative number — that is exactly the state ui/blocks.test.ts pins, so a LIVE
+                // pending delegation keeps its number.
+                //
+                // WHY `started` IS THE TEST (and not `explicitId === undefined`): a LEGACY
+                // threadless child adopts its placeholder by `findQueuedPlaceholder` (started, no
+                // runtime id) and IS a real run with real content; it keeps its number.
+                // `callId !== undefined` excludes every compiled-plane row, whose label is the
+                // server's own (`TurnSection.agentLabel`, already `T?` for these runs) — and since
+                // F10 (R10.1) a compiled row never MINTED an ordinal in the first place
+                // (`createThread`'s `compiled` option), so `retractEntryLabel` would have nothing
+                // to refund there and nothing to retire. That is the point of the asymmetry F6
+                // left: the sweep only ever cleans up a number the TILE burned, and on the
+                // compiled plane the tile burns none.
+                //
+                // `retractEntryLabel` skips a row whose label a roster join or the display wire
+                // already made authoritative, so this sweep can never overwrite a real
+                // conversation name.
+                for (const entry of threads.values()) {
+                    if (entry.started || entry.callId === undefined) continue;
+
+                    retractEntryLabel(entry);
                 }
 
                 // N3: an unresolved question cannot outlive its turn. Done/error/
@@ -5275,16 +5806,126 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // reserves its ordinal exactly like a create-time explicit label, so a
             // later same-code fallback cannot collide with `RR5`.
             reserveConversationLabel(label);
-            if (entry.label === label) return;
 
-            entry.label = label;
-            if (entry.select !== undefined) {
-                const name = entry.select.querySelector('.thread-name');
-                if (name !== null) name.textContent = label;
+            // F6: the number this tile minted is now SUPERSEDED by a real conversation name,
+            // so it is no longer displayed and goes back to the board — exactly the way the
+            // shared projection hands a placeholder's tentative mint to the join when the
+            // child's own conversation label arrives
+            // (../../shared/agent-results.ts:640-648). The refund is deliberately taken AFTER
+            // the paint below, because `tileHighWaterOf` computes from the labels on screen;
+            // a replacement that lands on the SAME number therefore refunds nothing.
+            const superseded = entry.mintedOrdinal;
+            const previous = entry.label;
+
+            if (previous !== label) {
+                entry.label = label;
+                if (entry.select !== undefined) {
+                    const name = entry.select.querySelector('.thread-name');
+                    if (name !== null) name.textContent = label;
+                }
+                // The section head of a section that is NOT the tile's root flow carries the same code.
+                const head = entry.section.root.querySelector('.agent-name');
+                if (head !== null) head.textContent = label;
             }
-            // The section head of a section that is NOT the tile's root flow carries the same code.
-            const head = entry.section.root.querySelector('.agent-name');
-            if (head !== null) head.textContent = label;
+
+            // F10 (R10.2): keep the board's "who wears which number" ledger exact. THIS function
+            // is the single writer of a row's NAME after creation, so it is also the only place
+            // that can say, without re-walking the DOM, that an ordinal stopped or started being
+            // displayed — which is what `ordinalIsFree` needs before it lets a retracted number
+            // come back.
+            wearOrdinal(previous, label);
+
+            // F10 (R10.5): the address changed, so the badge that stands BESIDE an unknown
+            // address has to be re-derived — created when the row's first name was `T?`/empty and
+            // the wire or the roster has just supplied a real one, and REMOVED in exactly that
+            // case. Painted before the superseded-mint refund because that refund is a no-op for
+            // the visual figure and the badge decision only reads `entry.label`.
+            paintEntryIdentity(entry);
+
+            if (superseded === undefined || superseded.label === label) return;
+
+            entry.mintedOrdinal = undefined;
+            retireOrdinal(superseded.code);
+            // F10 (R10.2): a mint that is no longer displayed is a free number, whoever took
+            // its row's place. Without this, a placeholder minted before its roster join could
+            // never be re-numbered by the late-adoption path below.
+            recordRetiredOrdinal(superseded);
+        };
+
+        // F10 (R10.5) — the record's better identity, shown BESIDE an unknown address.
+        //
+        // THE RULE, in the order the reviewer asked for it: a row whose name is NOT an address
+        // (`T?`, or the empty name a section with no `agentLabel` produced) shows the best
+        // identity the record actually holds for that run — `branchId` first, then the runtime
+        // invocation id — as its OWN element, never in the name slot. A fabricated `IT13` there
+        // would be worse than `T?`, because `IT13` looks addressable and resolves to nothing.
+        //
+        // WHY A REPEAT/EXCHANGE ROW IS DELIBERATELY NOT BADGED. Such a row does wear a real
+        // address — its conversation's code — it is merely WITHDRAWN for that row by the R7/D2
+        // rule (styles.css, `data-thread-exchange`/`data-thread-repeat`), because the card above
+        // already speaks for the conversation. Adding a second identity figure there would put a
+        // per-RUN id beside the per-CONVERSATION code the pass just decided to hide, i.e. it
+        // would re-print the figure the design withdraws on purpose. The row is therefore NOT
+        // nameless: the card above, `data-thread-exchange`, and (below) `data-thread-identity`
+        // all name it. The badge is reserved for the rows that own no address at all.
+        //
+        // `data-thread-identity` is stamped in BOTH cases — badge painted or not — so a test, a
+        // support read, or the repeat pass can tell WHY a row reads `T?` (or which run a hidden
+        // repeat is) without parsing a figure the stylesheet may legitimately hide.
+        const paintEntryIdentity = (
+            entry: Pick<ThreadEntry, 'label' | 'branchId' | 'explicitId' | 'exchangeOf'> &
+                Partial<Pick<ThreadEntry, 'select' | 'row' | 'preview' | 'identity'>>,
+            // F10 (R10.5): an identity the CALLER already holds. `createThread` paints its badge
+            // before the entry literal exists (see the call there), so it hands the figure in
+            // rather than reading it off a half-built object; every repaint path passes nothing
+            // and is answered from the entry's own `branchId`/`explicitId`.
+            known?: string
+        ): void => {
+            if (entry.select === undefined || entry.row === undefined) return;
+
+            const addressable = agentLabelParts(entry.label) !== undefined;
+            // The figure is computed whether or not the name is an address, because it is
+            // stamped as data in both states (see the header above).
+            const identity = known ?? threadIdentityOf({ branchId: entry.branchId, invocationId: entry.explicitId });
+
+            if (identity === undefined) {
+                if (entry.identity !== undefined) {
+                    entry.identity.remove();
+                    entry.identity = undefined;
+                }
+                delete entry.row.dataset.threadIdentity;
+
+                return;
+            }
+
+            entry.row.dataset.threadIdentity = identity;
+
+            // A row that wears a real address needs no badge — its code IS its identity — so the
+            // figure stays data-only there (and a badge a previous, still-nameless paint left
+            // behind is taken back).
+            if (addressable) {
+                if (entry.identity !== undefined) {
+                    entry.identity.remove();
+                    entry.identity = undefined;
+                }
+
+                return;
+            }
+
+            if (entry.identity === undefined) {
+                // Same lazy-creation discipline as `setThreadKind`'s `.thread-kind` tag: a row
+                // that never needs it never pays for it. Inserted BEFORE the preview so the row
+                // reads `code · identity · preview`, and CSS `order` keeps that slot (styles.css)
+                // even though the preview was appended first.
+                const badge = el('span', 'thread-runid', identity);
+                badge.title = `This run has no addressable conversation label; ${identity} is its recorded identity`;
+                entry.identity = badge;
+                entry.select.insertBefore(badge, entry.preview ?? null);
+
+                return;
+            }
+
+            entry.identity.textContent = identity;
         };
 
         // R8: the ROOT block shows the tile's PERSISTENT conversation label, not a
@@ -5311,6 +5952,13 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // hydration render, a whole-tree reconcile, one addressed ops frame (a late
             // `threadId`, a `section:remove` that deletes a card) and a roster landing.
             syncCompiledConversationCards();
+
+            // F4 (issue D, U3): fill in the task text of a row the roster never named, from
+            // the recorded spawning call. After the card election and before the labels/markers
+            // below, so a row whose text just arrived is measured and marked in the SAME pass —
+            // and so the parent's node list is already the one this pass painted, never a stale
+            // one from a partially applied frame.
+            syncCompiledThreadTasks();
 
             for (const entry of threads.values()) {
                 // The ROOT invocation has no row (its surface is the tile body), so
@@ -5545,6 +6193,12 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 entry.prompt = block;
             }
 
+            // F4: the body now restates this task, which is exactly the premise styles.css
+            // requires for hiding the header's preview line while the row is expanded. Delete
+            // the "the line is the only copy" marker written by `createThread` so the
+            // duplication rule applies to this row again.
+            if (entry.row !== undefined) delete entry.row.dataset.threadPreview;
+
             entry.prompt.replaceChildren(markdownFragment(input));
             // File mentions and images in a delegated task are the same affordance
             // as in the main prompt (R11); the transforms are DOM-only.
@@ -5588,6 +6242,20 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             if (entry.row === undefined) return;
             if (branchId !== undefined) entry.row.dataset.branchId = branchId;
             else delete entry.row.dataset.branchId;
+
+            // F6: a row whose BRANCH identity only arrives on THIS frame — it was created by a
+            // frame that named no branch, so it already burned an ordinal — gets exactly the
+            // treatment `createThread` gives a branch row at creation: the number goes back to
+            // the board and the row reads `UNKNOWN_THREAD_LABEL`. A branch that JOINED a
+            // conversation keeps that conversation's name, mirroring the shared projection,
+            // which retracts an ADOPTING branch only when it carries no conversation label
+            // (../../shared/agent-results.ts:649-654); `paintPersistentMarkers` restores a
+            // roster name here as soon as the join lands.
+            if (
+                isBranchRun(kind, branchId, entry.explicitId) &&
+                rosterClaimOf(entry.explicitId ?? entry.key) === undefined
+            )
+                retractEntryLabel(entry);
 
             if (kind !== 'fork' && kind !== 'autoanswer') {
                 entry.kindTag?.remove();
@@ -5757,6 +6425,13 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // this tile is that conversation's card (see `ThreadEntry.exchangeOf`). Only the
             // compiled card builder sets it, and only from a PROVABLE conversation id.
             exchangeOf?: string;
+            // F10 (R10.1): set by `compiledEntryOf` — the row mirrors a `TurnSection`, so its
+            // label ARRIVES (wire / roster join) or honestly says `T?`; it never mints.
+            compiled?: boolean;
+            // F10 (R10.5): the record's better identity for a row that cannot own an address
+            // (`branchId`, else the runtime invocation id). Painted as a `.thread-runid` badge
+            // by `paintEntryIdentity`, never into the name slot.
+            identity?: string;
         }): ThreadEntry => {
             const existing = threads.get(options.key);
             if (existing !== undefined) return existing;
@@ -5764,6 +6439,14 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // R1: one conversation, one visible name. Everything else about an exchange row is
             // the row of a run like any other (its own strip, meta, body and detail routes).
             const exchange = options.exchangeOf !== undefined;
+            // F10 (R10.1): the row was built from a compiled wire section, so its identity is
+            // SERVER-authored. Its name is one of exactly three things — the section's own
+            // `agentLabel` (painted by `paintCompiledSection`), the roster join's conversation
+            // name, or `T?` — and the local allocator is never consulted. The five rows of the
+            // operator's turn that were `IT13`/`WE1`/`IT14`/`IT15`/`IT16` are this case: they
+            // carried no `invocationId`/`threadId`/`branchId` at all, so every number on them
+            // was invented by the client, unaddressable, and (until R10.3) durable.
+            const compiled = options.compiled === true;
             const place = threadRowOf(options.parentKey);
             const bodyId = `thread-${++nextId}-body`;
 
@@ -5830,7 +6513,34 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // R1: an exchange row consumes NO fallback number. Its conversation code is its
             // card's, and the allocator exists for rows the reader actually reads a code from,
             // so merging a run must never renumber the threads after it.
-            const label = conversationLabel ?? (exchange ? '' : nextLabel(options.agent));
+            //
+            // F6 (2026-11-25): a BRANCH row consumes nothing either and reads
+            // `UNKNOWN_THREAD_LABEL` — the client twin of the shared projection's
+            // `reserveLabel: false` (../../shared/agent-results.ts:659-661). A `delegate`
+            // placeholder still mints its number HERE, because a live pending delegation must
+            // keep showing it (ui/blocks.test.ts pins that parity with the shared projection);
+            // whether that number survives is decided when the turn settles, by the sweep in
+            // `setState`.
+            //
+            // F10 (2026-11-26, R10.1): a COMPILED row consumes nothing either, whatever its
+            // shape. It is the EAGER-MINT half of the F6 asymmetry: the settle sweep only retracts
+            // a row that carries a `callId`, and a compiled row has none (`compiledEntryOf` passes
+            // `callId: undefined`), so a number minted for one on the first frame was neither
+            // refunded at settle nor reclaimable — it just sat there, and then
+            // `collectAgentLabelCounters` carried it into the durable `labelHighWater`. The
+            // compiled plane's rule is now uniform: identity ARRIVES or the row says `T?`.
+            //
+            // The mint is evaluated LAZILY on purpose: a row the roster already names, and an
+            // exchange row that repeats its card's code, must burn nothing from the sequence.
+            const fallback =
+                conversationLabel !== undefined || exchange
+                    ? undefined
+                    : mintThreadLabel({
+                          agent: options.agent,
+                          branch: isBranchRun(options.kind, options.branchId, options.explicitId),
+                          compiled
+                      });
+            const label = conversationLabel ?? fallback?.label ?? '';
             const name = el('span', 'thread-name', label);
             // R1/D2: an exchange row's REPEATED code is withdrawn by the stylesheet, not by the
             // `hidden` attribute. `[hidden] { display: none !important }` (styles.css:124)
@@ -5850,7 +6560,40 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 kindTag.dataset.kind = options.kind ?? '';
                 kindTag.title = options.kind === 'fork' ? 'Fork of this thread' : 'Automatic owner answer';
             }
-            const blockMeta = createBlockMeta({ elapsed: 'thread-elapsed', tokens: 'thread-tokens' });
+            const blockMeta = createBlockMeta(
+                { elapsed: 'thread-elapsed', tokens: 'thread-tokens' },
+                // A child row owns no quiet-state note (only the tile header does), so the
+                // paint hook stays absent — but the FIGURE report does not: this is the row
+                // the issue is about.
+                undefined,
+                // F4 (issue D, "some threads have no label … some are empty in total"): the
+                // row states, on itself, whether its measurement line can paint anything.
+                // Both labels are `[hidden]` for a section whose wire carried no
+                // `startedAt`/`endedAt` and no `latestInput`/`cachedInput`, and `[hidden]` is
+                // `display: none !important` (styles.css:124) — so the line is not merely
+                // quiet, it is GONE, and a row that also has its code withdrawn by the
+                // repeat/exchange rule (styles.css:3640) and its preview hidden while
+                // expanded (styles.css:4382) renders nothing a reader can see. The marker is
+                // the honest alternative to inventing a `0ms` or a `0` token figure: styles.css
+                // answers `data-figures='none'` by giving the row its state word back (and its
+                // code, when the code was the other thing withdrawn).
+                //
+                // The row is resolved from the label's OWN ancestry rather than from `entry`:
+                // a figure paint can land while `createThread` is still assembling the row, and
+                // `const entry` is not initialised yet at that moment. No ancestry, no marker —
+                // the next paint writes it once the row exists.
+                (figures) => {
+                    const row = blockMeta.elapsed.closest<HTMLElement>('.thread-row');
+                    if (row === null) return;
+
+                    row.dataset.figures = figures.elapsed || figures.tokens ? 'shown' : 'none';
+                }
+            );
+            // Both labels are created `hidden` (`createBlockMeta`, :1220-1222), so at this
+            // instant "no figures" is a fact rather than a guess, and a row that never receives
+            // a timing or usage figure keeps that fact stated. The first paint that shows either
+            // label rewrites it to `shown` through the reporter above.
+            threadRow.dataset.figures = 'none';
             // Status stays TEXT: the word is clipped (not removed) in EVERY header state,
             // exactly like `.tile-status-text`, and colour only reinforces it.
             // R3/T2: the box closes the MEASUREMENT line (`34.2s | 18,654 (37,376)`, the
@@ -5869,9 +6612,27 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 'span',
                 'thread-preview',
                 options.input === undefined || options.input.length === 0
-                    ? 'delegated task'
+                    ? DELEGATED_TASK_PREVIEW
                     : plainPreview(options.input, 160)
             );
+            // F4 (issue D): does this line carry the row's ONLY copy of the task?
+            //
+            // styles.css hides `.thread-preview` while a row is expanded
+            // (`.thread-row.is-expanded .thread-preview`, :4382) for ONE reason, stated in its
+            // own comment: the body renders the task as Markdown, so the header line would
+            // duplicate it. That premise holds only when a `.thread-prompt` block EXISTS —
+            // `renderThreadPrompt` is the sole writer, and a row whose task text never arrived
+            // (a run no roster row claimed) has no body prompt at all. Expanding such a row used
+            // to delete its last visible figure: no prompt block below, no preview above, the
+            // code withdrawn by the repeat/exchange rule, the state word clipped and the two
+            // labels hidden — an empty band of border. The marker records which case a row is
+            // in, from the same `options.input` the preview text is built from, and styles.css
+            // keeps the line for `data-thread-preview='true'`. `renderThreadPrompt` clears it the
+            // moment a body block exists, so the duplication rule keeps working for every row
+            // that has real task text.
+            if (options.input === undefined || options.input.length === 0) {
+                threadRow.dataset.threadPreview = 'true';
+            }
             // Identity first (the conversation code, then the fork/auto marker), the
             // flexible preview in the middle, and the measurement line — clock, tally,
             // state word — flush right (R3/R1: one anatomy with the compact tile).
@@ -5946,6 +6707,18 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 explicitId: options.explicitId,
                 kind: options.kind,
                 branchId: options.branchId,
+                // F6: the ordinal this tile minted for the row, kept ONLY while that minted
+                // number is what the row displays. Undefined here means the row never minted
+                // anything (a roster-named row, an exchange row, a branch row), so there is
+                // nothing to refund when the run turns out not to own a label.
+                mintedOrdinal: fallback?.minted,
+                // F10 (R10.1): the plane this row's identity comes from (see `createThread`'s
+                // `compiled` option). Only the compiled builder sets it, and only `mintThreadLabel`
+                // reads it — nothing else may treat "server-authored" as an inference.
+                ...(options.compiled === true ? { compiled: true } : {}),
+                // F10 (R10.5): filled by the paint below, once `entry` exists and can carry its
+                // own badge handle.
+                identity: undefined,
                 // First evidence wins and is never rewritten (the same rule the server's
                 // projector applies when it binds a row's epoch).
                 ...(options.epoch === undefined ? {} : { epoch: options.epoch }),
@@ -5995,6 +6768,20 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 disposeActionBar: actionBar.dispose,
                 expanded: false
             };
+
+            // F10 (R10.5): a compiled row whose name is not an address shows the record's better
+            // identity from the FIRST frame, not only after a repaint — the reviewer's screenshot
+            // showed rows that stayed blank/`T?` forever because nothing ever re-painted them.
+            // Guarded on `compiled` so a raw-plane row keeps the exact DOM it had before (no
+            // badge element, no `data-thread-identity`), which every existing structure test pins.
+            if (compiled) paintEntryIdentity(entry, options.identity);
+
+            // F10 (R10.2): the row is on screen wearing `label` from this frame, so the board's
+            // ordinal ledger has to know about it. This is the SECOND of the two label sites (see
+            // `wearOrdinal`): creation builds the row around its first label instead of routing it
+            // through `paintEntryLabel`, which would also `reserveConversationLabel` a number this
+            // tile just minted and defeat the F6 refund.
+            wearOrdinal(undefined, label);
 
             // T6: expose the SAME state transition to the board's implicit
             // `openEnclosingCards` pass, so an auto-opened card updates
@@ -6112,7 +6899,14 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // same-code child fallback continues AFTER it.
             const conversationLabel = rootConversationLabel();
             reserveConversationLabel(conversationLabel);
-            const label = conversationLabel ?? nextLabel(agentName);
+            // F6: routed through `mintThreadLabel` so all three mint sites ask the same
+            // question, and the mint is recorded so a root that LATER adopts a conversation
+            // label (`paintRootLabel`) hands its fabricated number back instead of leaving the
+            // board with a gap. `branch` is deliberately absent: a turn's own root flow IS a
+            // conversation, which is why the shared projection gives the root block a label
+            // unconditionally (../../shared/agent-results.ts:569).
+            const fallback = conversationLabel === undefined ? mintThreadLabel({ agent: agentName }) : undefined;
+            const label = conversationLabel ?? fallback?.label ?? '';
             // R5/T7: the root block's content IS `.tile-body`, so its footer chevron
             // closes the BOARD's single expanded conversation. There is exactly one
             // chevron for this block now: the collapsed tile's whole row (`.tile-select`)
@@ -6147,6 +6941,10 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 disposeActionBar: () => undefined,
                 agent: agentName,
                 label,
+                // F6: the minted ordinal, refundable if this root later adopts its
+                // conversation label. `undefined` when the conversation label was already
+                // known, because then nothing was minted.
+                mintedOrdinal: fallback?.minted,
                 input: undefined,
                 callId: undefined,
                 parentKey: undefined,
@@ -6199,7 +6997,13 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             // The flat legacy block consumes one occurrence, like any other
             // invocation of that agent; the same label goes to the header and to the
             // entry (R2).
-            const label = nextLabel(agentName);
+            //
+            // F6: `branch` is absent here for the same reason it is absent at the root — the
+            // shared projection mints for a threadless legacy block unconditionally
+            // (../../shared/agent-results.ts:585): it is a real run with real content, just one
+            // the record cannot attribute to an invocation.
+            const fallback = mintThreadLabel({ agent: agentName });
+            const label = fallback.label;
             const section = createSection(flow, agentName, { rank: rankForAgent(agentName) }, label);
             threads.set(key, {
                 key,
@@ -6208,6 +7012,11 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                 syncActionBar: () => undefined,
                 disposeActionBar: () => undefined,
                 label,
+                // F6: refundable mint (see `ThreadEntry.mintedOrdinal`). A flat legacy block
+                // has no settle-time sweep (`callId` is undefined, exactly as in the shared
+                // projection) and no roster join, so in practice this stays reserved — the
+                // field is here so the refund rule has one shape across all three mint sites.
+                mintedOrdinal: fallback.minted,
                 input: undefined,
                 callId: undefined,
                 parentKey: undefined,
@@ -6296,6 +7105,13 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             if (meta.callId !== undefined) entry.callId = meta.callId;
             setThreadInput(entry, meta.input);
             setThreadKind(entry, meta.kind, meta.branchId);
+            // F10 (R10.2): a placeholder that had ALREADY settled without a child (the sweep in
+            // `setState` retracted its number and it reads `T?`) can still be adopted late — a
+            // restart, a `thread` record that arrives after the terminal frame, a roster poll that
+            // delivered the join before the child's transcript. Such a row takes ITS OWN number
+            // back when it is provably free; a row the roster already names is repainted by the
+            // pass below and never reaches this.
+            reinstateEntryLabel(entry);
             // T-W10: `parentId` names the parent's invocation id; the parent's ROW answers to
             // its run key, so the reference is canonicalized before it is stored.
             const nextParentKey = parentKeyOf(meta.parentId, meta.epoch);
@@ -8545,6 +9361,159 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
             return undefined;
         };
 
+        // --- F4 (issue D, U3): the task text a compiled child row prints -----------------
+        //
+        // THE GAP: `TurnSection` carries no task text, so a compiled row's only documented
+        // source is the COMPACT roster's bounded transcript preview, joined at
+        // `createThread`'s `input` (:9072) by invocation id. A run the roster never named —
+        // a `threadFork` branch (the roster lists conversations, not branches), a conversation
+        // whose row the retention ring already evicted, an invocation join the server never
+        // resolved — therefore keeps the literal 'delegated task' forever, and combined with
+        // the styles.css withdrawals (the repeated code, the hidden expanded preview, the
+        // clipped state word and the `[hidden]` figure labels) that is the reported
+        // "no label / empty in total" row.
+        //
+        // THE TEXT THAT IS THERE: the spawning call is a recorded `DisplayStep` of the
+        // PARENT section (`delegate` / `threadFork`, whose `input` argument is the brief), and
+        // the raw plane already reads the same evidence for the same purpose (the
+        // `delegateOf` branch of the `appendTool` handler, :7421). This is that reading on the
+        // compiled plane: same data, no wire change, no invented text.
+        //
+        // ATTRIBUTION, AND WHY IT IS THIS NARROW. `TurnSection` names the spawning section
+        // (`parentSectionId`) and the child's `agent`, and a `delegate` call names its target
+        // agent, so a call can be a candidate for a row only when the agent matches (a
+        // `threadFork` never changes agent — the rank model forbids delegating to your own
+        // agent, so a same-agent child IS the fork's branch). A call is ACCEPTED only when the
+        // pairing is PROVEN by the painted data, in one of exactly two ways:
+        //   1. the parent made exactly ONE candidate call and this is the parent's only
+        //      same-agent child — the case the rule has always accepted; or
+        //   2. the call's recorded RESULT preview names this child's run / conversation /
+        //      branch id (`stepNamesId`), and exactly one candidate call does.
+        //
+        // F10 (R10.4) REMOVED the third way the rule used to accept a pairing: "equal counts,
+        // pair position with position". It was not a pairing, it was a guess, and the operator's
+        // session proved it wrong on both axes — the root section holds 34 recorded calls while
+        // one agent has 7 same-agent children (counts never matched, so most rows kept nothing),
+        // and where counts DID match, `TurnSection` allocation order is the projector's ARRIVAL
+        // order, not the call order, so the row at position 2 was not the child of the call at
+        // position 2. The projector resolves that join with the callId (`turn-projector.ts`
+        // `createChild` binds `threadLabels[runKey]` from the call), but `TurnSection` carries no
+        // `callId` on the frozen wire, so the join is invisible to a client. Anything looser than
+        // an id is a coin flip between two sibling delegations, and a wrong brief beside a run is
+        // worse than an honest 'delegated task'. A bounded preview that cut the id away is the
+        // intended miss: no text, not the wrong text.
+        const delegationTaskOf = (entry: ThreadEntry): string | undefined => {
+            const section = entry.compiledSection;
+            if (section === undefined) return undefined;
+
+            // The turn's own flow is not delegated, and a section whose parent is not painted
+            // here (a corrupt/foreign `parentSectionId`, a parent the projector omitted) has no
+            // evidence in this tile.
+            const parentId = section.parentSectionId;
+            if (parentId === undefined || parentId.length === 0) return undefined;
+
+            const parent = compiledSections.get(parentId)?.compiledSection;
+            if (parent === undefined) return undefined;
+
+            // This row's same-agent siblings under that parent. F10 (R10.4): the COUNT is all the
+            // rule needs now — the positional index it used to supply was the guess that went
+            // away. `compiledSections` is inserted in the server's allocation order and a section
+            // object is held BY REFERENCE (see :4893), so the tally is exact without an id pass.
+            let sameAgentChildren = 0;
+
+            for (const sibling of compiledSections.values()) {
+                const other = sibling.compiledSection;
+
+                if (other === undefined) continue;
+                if (other.parentSectionId !== parentId || other.agent !== section.agent) continue;
+
+                sameAgentChildren += 1;
+            }
+
+            // The recorded calls under that parent that could have spawned THIS row, each paired
+            // with the brief its argument string holds (parsed once).
+            const calls: { step: DisplayStep; input: string }[] = [];
+
+            for (const node of parent.nodes ?? []) {
+                // `DisplayStep` IS a `DisplayNode` (turn-display.ts:921); only a tool call
+                // names a spawning call, and only one of the two runtime names spawns a row.
+                if (node.kind !== 'tool' || !DELEGATION_CALL_NAMES.has(node.name)) continue;
+
+                const args = callArgsOf(node.argsPreview ?? '');
+
+                // No recoverable `input`, nothing to print. The preview is bounded at 200
+                // characters, so this is also the "the model never finished the brief" case.
+                const input = args.input;
+
+                if (input === undefined) continue;
+
+                if (node.name === 'delegate' && args.agent !== section.agent) continue;
+
+                calls.push({ step: node, input });
+            }
+
+            if (calls.length === 0) return undefined;
+
+            // F10 (R10.4): the ids THIS row is addressable by, in the order the wire states them.
+            // A compiled row may carry any subset — a delegated child names `invocationId` +
+            // `threadId`, a `threadFork` branch names `branchId` (+ the PARENT's `threadId`, which
+            // is why `branchId` is tried first), and a run the projector could not attribute names
+            // nothing at all. No ids, no join: the one-call case below is the only faith left.
+            const ids = [section.branchId, section.invocationId, section.threadId].filter(
+                (value): value is string => typeof value === 'string' && value.length > 0
+            );
+
+            if (calls.length === 1) {
+                // Forced: one child, one call naming it. (A child whose own call was never
+                // recorded is the case this accepts on faith — the same faith the card election
+                // places by, and there is no competing candidate on screen.)
+                if (sameAgentChildren !== 1) return undefined;
+
+                return (calls[0] as { input: string }).input;
+            }
+
+            // Proven by identity: exactly one candidate call's recorded result names this run.
+            // Two calls naming the SAME conversation (`agent:debugger` on the operator's session —
+            // two delegations into one persistent conversation) is deliberately NOT a pairing;
+            // it is two callers, and choosing between them is the coin flip the rule forbids.
+            const proven = calls.filter(
+                (call) => typeof call.step.preview === 'string' && ids.some((id) => stepNamesId(call.step.preview as string, id))
+            );
+
+            if (proven.length !== 1) return undefined;
+
+            return (proven[0] as { input: string }).input;
+        };
+
+        // Paints the recovered task on every compiled row that has no task of its own. A PASS
+        // rather than a creation-time decision for the same reason the card election is one:
+        // the parent's call node and this row's section can arrive in either order, and the
+        // roster claim that would have won (`createThread`'s `input`) can land later.
+        //
+        // PREVIEW-ONLY, deliberately: `setThreadInput` would also prepend a `.thread-prompt`
+        // block to the body, which is a change to the compiled body shape (and to the row's
+        // aria/outline) that this issue does not ask for. The header line is where a delegated
+        // task belongs on a row that has no body prose, and the `data-thread-preview='true'`
+        // marker `createThread` stamped stays set, so styles.css keeps that line visible while
+        // the row is expanded.
+        const syncCompiledThreadTasks = (): void => {
+            for (const entry of compiledSections.values()) {
+                const current = entry.input;
+
+                // A row that already carries a task the server gave it keeps it: the roster's
+                // own bounded preview wins over anything recovered here.
+                if (current !== undefined && current.length > 0 && current !== DELEGATED_TASK_PREVIEW)
+                    continue;
+
+                const task = delegationTaskOf(entry);
+
+                if (task === undefined || task === current) continue;
+
+                entry.input = task;
+                if (entry.preview !== undefined) entry.preview.textContent = plainPreview(task, 160);
+            }
+        };
+
         // Flip one compiled row between CARD and EXCHANGE without re-creating it: the visible
         // name and the row's parent are the two figures that carry the role, so they move
         // together and everything else about the row (its section id, strip, flow, clock, dialog
@@ -8741,6 +9710,16 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
                     started: section.state !== 'open',
                     state: sectionThreadState(section.state),
                     branchId: section.branchId,
+                    // F10 (R10.1): this row's identity ARRIVES — `section.agentLabel`, the roster
+                    // join, or `T?`. It never burns a local ordinal.
+                    compiled: true,
+                    // F10 (R10.5): the best identity the section carries, for the badge a `T?`
+                    // row shows. A branch section's `invocationId` IS its `branchId` on the wire
+                    // (see the operator's `:8`/`:18`/`:25`), so the `??` is belt-and-braces, and
+                    // `threadIdentityOf` prefers `branchId` whenever both are present.
+                    ...(section.branchId ?? section.invocationId) === undefined
+                        ? {}
+                        : { identity: section.branchId ?? section.invocationId },
                     // R1: the role marker (see `ThreadEntry.exchangeOf`) — set only when this run
                     // is a later run of a conversation an earlier section already owns.
                     ...(conversation === undefined || card === undefined ? {} : { exchangeOf: conversation })
@@ -11164,6 +12143,14 @@ export const createTurnBoard = (options: TurnBoardOptions = {}): TurnBoard => {
         // A cleared board starts a new numbering (hydrate re-creates the tiles in
         // recorded order, so the conversation's labels are rebuilt exactly).
         labelCounters.clear();
+        // F6: the floors belong to the numbering too — `hydrate` re-creates the tiles in
+        // recorded order and re-raises them from the labels it paints.
+        labelFloors.clear();
+        // F10 (R10.2): the two ledgers that make a refund/reinstatement decision safe belong to the
+        // same numbering. A rebuilt board paints its own labels again (via `wearOrdinal`), and a
+        // number freed on the way out cannot be handed back to a row of the NEXT board.
+        displayedOrdinals.clear();
+        retractedOrdinals.clear();
         // R3: the remembered invocation → thread joins belong to the conversation
         // being torn down. Keeping them would let an invocation id of the NEXT
         // session resolve to a thread of the previous one (ids are opaque and only
