@@ -1663,6 +1663,54 @@ export const isAgentRank = (value: unknown): value is AgentRank =>
 // available).
 export type ToolCreationPolicy = 'all' | false | AgentRank;
 
+// issue 0032 (2026-11-26) — WHAT A STOPPED RUN'S LEDGER ROW SAYS ABOUT ITS TOOL CALLS.
+//
+// THIS IS THE CLIENT MIRROR of `HarnessToolActivity` in the engine's own types
+// (`packages/underload/harness/src/engine/types/index.ts`); the shape, the bounds and the
+// absence rule are the server's, and this package only reads what the server answers carry.
+//
+// THE GAP THIS CLOSES. A run that was cancelled or failed left an account of what it SAID
+// (`partialContent`) and how far it got (`cancelledAtMessage`), and nothing of what it DID:
+// its tool calls were rolled out of the transcript, and the row had no tally, so a reader
+// looking only at `agentResult`/`agentManage` could not tell "fifty useful lookups" from
+// "retried one doomed call fifty times". This is the bounded tally that answers it.
+//
+// THREE PROPERTIES, each of which is an acceptance criterion in the issue, and each of which
+// is enforced SERVER-SIDE before this type ever sees a value:
+//   * SEPARATE from `partialContent` — 0020's leak boundary says the surviving TEXT field is
+//     the run's last committed assistant text and never a tool RESULT body. This field keeps
+//     that: it carries counts and tool NAMES (already public through the tool catalogue), and
+//     no body, no argument, no system-instruction text.
+//   * BOUNDED by construction — two fixed-width counts plus at most `TOOL_ACTIVITY_NAME_CAP`
+//     (8, engine `src/engine/core/agent-limits.ts`) `byName` entries, each name itself capped at
+//     64 characters by the tool-name rule. `truncated: true` is the cap saying "the list closed
+//     here", never "the run stopped here".
+//   * ABSENT rather than zero-shaped — a run that registered no invocation reports NO field, so
+//     "did nothing" and "reported nothing" stay distinguishable (0029's no-invented-identity
+//     rule, 0032's AC6). A reader here must therefore treat absence as unknown, never as 0.
+//
+// WHERE IT APPEARS. On the same unfinished-run answers that already carry `partialContent`:
+// the `delegate` envelope below, and `agentResult`'s cancelled/failed shape. It never enters a
+// message, so provider pairing and every transcript view are untouched.
+export type HarnessToolActivity = {
+    // Tool invocations this run REGISTERED — calls that became scheduled work. A call refused
+    // before it started (unknown tool, malformed arguments, out of scope) answers inline and is
+    // not counted, which is what makes "it never got to call anything" reportable.
+    calls: number;
+    // Of those, how many reached a terminal task state and had their outcome handled (a result
+    // delivered, an error delivered, or a release/cancellation recorded). A call still in flight
+    // when the run was stopped — or released by the abandon sweep that never notifies — is
+    // counted here, so `calls - settled` is the number of rounds the stop caught mid-flight.
+    settled: number;
+    // The 8 busiest names, ordered by `calls` descending with the name ascending as the
+    // tie-break, so the list is deterministic across runs and processes. Present whenever the
+    // tally itself is present; absence means "nothing to break down", never "one tool".
+    byName?: Array<{ name: string; calls: number }>;
+    // True when the cap closed `byName` — i.e. the run used MORE distinct names than the cap
+    // lists, so the list below is a top-N, not an inventory. It says nothing about the run ending.
+    truncated: boolean;
+};
+
 // What a delegation hands back to its caller: the child agent's answer, not its
 // transcript (history stays with the child).
 //
@@ -1732,11 +1780,22 @@ export type HarnessDelegationResult = {
     // still readable with the same partial after `restore()` and across a server
     // restart. What NEVER survived a restart, before or after that fix, is the rest of
     // the run: its transcript (rolled back) and its tool calls and tool bodies (never
-    // retained) are gone for good — 0020's leak boundary and 0032.
+    // retained) are gone for good — 0020's leak boundary and 0032. Since 0032 the CALLS
+    // themselves are no longer entirely gone: the bounded `toolActivity` tally below says
+    // how many ran and which names, and it stays a tally — no call's arguments, no call's
+    // result body, none of the prose those bodies carried.
     partialContent?: string;
     // How many messages the child had appended when it was cancelled/failed. This is
     // the "how far did it get" number the transcript rollback used to erase.
     cancelledAtMessage?: number;
+    // issue 0032 (2026-11-26) — WHAT THE STOPPED RUN DID, beside what it said. The bounded
+    // tally of its tool calls (`HarnessToolActivity`), emitted on the same non-completed runs
+    // that carry `partialContent` and ABSENT (never `{ calls: 0 }`) for a run that registered
+    // no invocation at all. Read it as counts and names only: it is the sibling that 0020's
+    // leak boundary allows, because a tool NAME is public vocabulary while a tool RESULT body
+    // is exactly what that boundary keeps out. A client must treat an absent key as "the server
+    // recorded nothing", not as "the run called nothing".
+    toolActivity?: HarnessToolActivity;
     // D2 (2026-11-14, issues 0021/0019) — the CALL was released by `toolCancel` while the
     // child's terminal record was still readable. Present (true) on exactly one door: the
     // delivered tool message of a cancelled delegation. It separates "the caller let go of the
@@ -4455,9 +4514,12 @@ export type HarnessAgentResultSnapshot = {
     // covers the answer the run was still STREAMING when it was cut off, not only text
     // it had committed (issue 0020, AC1) — the capture point is `runAgentCore`'s
     // cancellation catch, which reads the per-request buffer first and the committed
-    // transcript second, so the fresher evidence wins. Never widened to tool calls or
-    // tool bodies: a rolled-back run's tool activity is deliberately not retained
-    // (0020's leak boundary, 0032).
+    // transcript second, so the fresher evidence wins. NEVER widened to tool calls or tool
+    // RESULT BODIES: what a rolled-back run deliberately does not retain is the individual
+    // calls and the text their results carried (0020's leak boundary) — that is exactly why
+    // this field stayed text-only. What IS retained on a stopped run is the BOUNDED
+    // `toolActivity` tally below (`calls`, `settled`, and up to `TOOL_ACTIVITY_NAME_CAP` tool
+    // names, 0032); counts and names clear that boundary, result bodies do not.
     partialContent?: string;
     // How many messages that run had committed when it stopped. Optional for the same
     // reason as `partialContent`, and absent on a completed record: an envelope that
@@ -4465,9 +4527,28 @@ export type HarnessAgentResultSnapshot = {
     // so the pair travels together (issue 0033). Counts committed messages; it is NOT a
     // measure of progress (0022).
     cancelledAtMessage?: number;
+    // issue 0032 (2026-11-26) — the fourth forensic member of a run that did not finish, on the
+    // DURABLE row as well as on the live envelope: the bounded tally of its tool calls
+    // (`HarnessToolActivity`, mirrored above), written on the SAME non-completed rows that carry
+    // `partialContent` and ABSENT — never `{ calls: 0 }` — when the run registered no invocation
+    // (0032's AC6). Counts and names only: it is the sibling 0020's leak boundary allows, because
+    // a tool NAME is public vocabulary while a tool RESULT body is what that boundary keeps out,
+    // which is also why the `partialContent` above stayed a text field instead of widening.
+    //
+    // BOUNDED, so the record's retention argument still holds: at most 8 `byName` entries whose
+    // names are themselves capped by the tool-name rule, so a row grows by a fixed amount.
+    //
+    // ABSENT ON A `completed` ROW, on pain of an unrestorable document: the engine's snapshot
+    // reader (its `readAgentResults`, in `packages/underload/harness/src/engine/core/snapshot.ts`)
+    // refuses a completed row that carries the key, exactly as it already refuses a completed row
+    // carrying `stopReason`, because the next projection would drop the key and
+    // `restore -> snapshot` would stop being idempotent. A client reading an OLD snapshot simply
+    // sees no key, so the schema version did not move.
+    toolActivity?: HarnessToolActivity;
     // WHY the run reached a non-concluded terminal state (../core/snapshot.ts refuses a
     // value outside `HarnessRunStopReason`; the live half is
-    // `HarnessThreadRecord.stopReason`). The forensic trio's last member:
+    // `HarnessThreadRecord.stopReason`). The forensic trio's last member (and the tally above is
+    // 0032's fourth member, counted alongside it rather than replacing it):
     // `partialContent` says what it SAID, `cancelledAtMessage` says HOW FAR it got, and this
     // says WHY it stopped — which until now survived only as English prose in `error`, so a
     // caller could not tell "the parent released the call" from "the provider ran out of
@@ -4566,6 +4647,14 @@ export type HarnessInvocationArchiveInput = {
     // How many messages that run had COMMITTED when it stopped (an integer >= 0; NOT a measure of
     // progress — issue 0022). Travels with `partialContent`.
     cancelledAtMessage?: number;
+    // issue 0032 (2026-11-26): the bounded tool-activity tally of a run that did not finish, on
+    // identical terms to the pair above — OPTIONAL so an older send stays valid, VALIDATED (not
+    // coerced) against the snapshot reader's own bounds on the server, and DROPPED on a `completed`
+    // status, because the engine's `readAgentResults` refuses to READ a completed row that carries
+    // the key. Without this link the tally exists in inline deployments only: the lane replica
+    // produces it in its own `finishInvocation`, and an archive payload that names a field's
+    // absence is how a forensic field dies quietly.
+    toolActivity?: HarnessToolActivity;
     // IT19 (R3/R5): WHY a non-concluded lane run stopped, in the machine-readable vocabulary
     // (the closed `HarnessRunStopReason` union; the row it produces is
     // `HarnessAgentResultSnapshot.stopReason`). A lane child is interrupted by causes the
