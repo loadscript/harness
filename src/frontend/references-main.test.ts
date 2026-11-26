@@ -406,7 +406,14 @@ it('sends a reference while the previous task is still running (queued state)', 
     expect(tiles.map((tile) => tile.dataset.state)).toEqual(['streaming', 'queued']);
 });
 
-it('offers only referenceable blocks (done/running), never failed or cancelled', async () => {
+// R-TREF (2026-11-26) — the popup used to answer "only done/running", which left the rows the
+// operator most needs to NAME out of reach even after F11 gave every one of them a valid,
+// unique address. The gate, the picker and the server moved in ONE fold: `isReferenceableBlock`
+// (./ui/references.ts) now offers every status, and the server binds a terminal target and
+// composes the "no result available" note (underload's src/server/references.test.ts
+// 'terminal references bind' is that half). What the gate still drops is a label with no
+// address at all — asserted in ./ui/references.test.ts.
+it('offers every block that owns an address, terminal rows included', async () => {
     const failed = restored();
     failed.turns = [
         turn({
@@ -441,20 +448,114 @@ it('offers only referenceable blocks (done/running), never failed or cancelled',
     input.value = '#';
     input.setSelectionRange(1, 1);
 
-    // The failed and cancelled roots allocate IT1/IT2, but only the third (running)
-    // block is referenceable: a failed block never hides an earlier completed one,
-    // and it is never offered itself.
-    expect(popupTokens()).toEqual(['#IT3']);
+    // All three rows are offered, oldest first — the failed and cancelled roots are IT1/IT2 and
+    // the running one is IT3. A failed block neither hides an earlier one nor hides itself.
+    expect(popupTokens()).toEqual(['#IT1', '#IT2', '#IT3']);
     expect(
         [...document.querySelectorAll<HTMLElement>('.composer-popup-state')].map((node) => node.textContent)
-    ).toEqual(['running']);
+    ).toEqual(['error', 'cancelled', 'running']);
 
+    // The picker's default row is the FIRST one — a dead row is a normal candidate now.
     press('Enter');
     const chip = document.querySelector<HTMLElement>('.composer-input [data-chip="reference"]');
-    expect(chip?.dataset.referenceTurn).toBe('r1');
+    expect(chip?.dataset.referenceTurn).toBe('f1');
+    expect(chip?.dataset.referenceLabel).toBe('IT1');
 });
 
-it('does not offer a failed legacy inline block in the # popup', async () => {
+it('submits a terminal root chip as the label-only reference the server binds', async () => {
+    // THE CLIENT HALF OF "chips must never mint that fail at submit". A turn that
+    // ended `error` leaves only terminal rows, and the root row is still addressable.
+    // A root block carries no thread address — `referenceOfBlock` omits `threadId`
+    // as the documented root signal (references.ts:127) — so the chip and the POST
+    // must stay label-only, exactly the pair `bindReference` resolves through its
+    // label map for a terminal block. A minted `instruct:IT1` token here would be a
+    // thread address the server never projected.
+    const failed = restored();
+    failed.turns = [
+        turn({
+            id: 'f1',
+            index: 0,
+            prompt: 'failed',
+            status: 'error',
+            events: [{ type: 'start', agent: 'instruct', model: 'm1' }]
+        })
+    ];
+    const calls = stubServer(failed);
+    await mount();
+
+    const input = composer();
+    input.value = 'what went wrong with #';
+    input.setSelectionRange(22, 22);
+
+    expect(popupTokens()).toEqual(['#IT1']);
+
+    press('Enter');
+    expect(input.value).toBe('what went wrong with #IT1');
+
+    const chip = document.querySelector<HTMLElement>('.composer-input [data-chip="reference"]');
+    expect(chip?.dataset.referenceTurn).toBe('f1');
+    expect(chip?.dataset.referenceThread).toBeUndefined();
+    expect(chip?.dataset.referenceLabel).toBe('IT1');
+
+    submit();
+    await flush();
+
+    expect(taskBodies(calls)).toEqual([
+        {
+            input: 'what went wrong with #IT1',
+            references: [{ turnId: 'f1', label: 'IT1' }]
+        }
+    ]);
+});
+
+it('submits a terminal inline chip with the thread token the server projects', async () => {
+    // The other half of the same guarantee, for a row that DOES own a thread
+    // address: a cancelled turn leaves two legacy inline rows, and the chip must
+    // carry `inline:<agent>` — the id `projectThreadStates` assigns such a row
+    // (agent-results.ts:978, 1039) and the only token `bindReference` accepts —
+    // rather than anything derived from the label.
+    const legacy = restored();
+    legacy.turns = [
+        turn({
+            id: 'c1',
+            index: 0,
+            prompt: 'cancelled',
+            status: 'cancelled',
+            events: [
+                { type: 'start', agent: 'instruct', model: 'm1' },
+                { type: 'start', agent: 'research', model: 'm1' }
+            ]
+        })
+    ];
+    const calls = stubServer(legacy);
+    await mount();
+
+    const input = composer();
+    input.value = 'repeat this #RH';
+    input.setSelectionRange(15, 15);
+
+    expect(popupTokens()).toEqual(['#RH1']);
+
+    press('Enter');
+    expect(input.value).toBe('repeat this #RH1');
+
+    const chip = document.querySelector<HTMLElement>('.composer-input [data-chip="reference"]');
+    expect(chip?.dataset.referenceTurn).toBe('c1');
+    expect(chip?.dataset.referenceThread).toBe('inline:research');
+    expect(chip?.dataset.referenceLabel).toBe('RH1');
+
+    submit();
+    await flush();
+
+    expect(taskBodies(calls)).toEqual([
+        {
+            input: 'repeat this #RH1',
+            references: [{ turnId: 'c1', threadId: 'inline:research', label: 'RH1' }]
+        }
+    ]);
+});
+
+it('offers a failed legacy inline block in the # popup', async () => {
     const legacy = restored();
     legacy.turns = [
         turn({
@@ -486,14 +587,21 @@ it('does not offer a failed legacy inline block in the # popup', async () => {
     input.value = '#';
     input.setSelectionRange(1, 1);
 
-    // The row-less `inline:research` child errored; only the completed root offers
-    // a referenceable block.
-    expect(popupTokens()).toEqual(['#IT1']);
+    // The row-less `inline:research` child errored, and that error is exactly what the operator
+    // wants to ask about — so it is offered alongside the completed root.
+    expect(popupTokens()).toEqual(['#IT1', '#RH1']);
+
+    // Filter to the failed child and pick it: the chip carries the synthetic identity the server
+    // resolves as an alias (`inline:<agent>`), with the label of the row it came from.
+    input.value = 'ask #RH';
+    input.setSelectionRange(8, 8);
+    expect(popupTokens()).toEqual(['#RH1']);
 
     press('Enter');
     const chip = document.querySelector<HTMLElement>('.composer-input [data-chip="reference"]');
-    expect(chip?.dataset.referenceLabel).toBe('IT1');
-    expect(chip?.hasAttribute('data-reference-thread')).toBe(false);
+    expect(chip?.dataset.referenceLabel).toBe('RH1');
+    expect(chip?.dataset.referenceThread).toBe('inline:research');
+    expect(chip?.dataset.referenceTurn).toBe('l1');
 });
 
 it('normalizes ./ and backslash path queries for both lookup and filtering', async () => {
@@ -523,7 +631,12 @@ it('normalizes ./ and backslash path queries for both lookup and filtering', asy
     ).toEqual(['src/frontend/main.ts']);
 });
 
-it('does not offer cancelled legacy inline blocks in the # popup', async () => {
+it('offers cancelled legacy inline blocks in the # popup', async () => {
+    // The third terminal arm, pinned at the picker level: a turn cancelled before
+    // either agent finished projects `IT1`/`RH1` as cancelled rows, and they are
+    // offered like any other address (the note is their recovery at submit, not a
+    // reason to hide them). Neither row is a root thread here - the turn never
+    // adopted a delegate - so paint order is plain label order.
     const legacy = restored();
     legacy.turns = [
         turn({
@@ -544,8 +657,7 @@ it('does not offer cancelled legacy inline blocks in the # popup', async () => {
     input.value = '#';
     input.setSelectionRange(1, 1);
 
-    expect(popupTokens()).toEqual([]);
-    expect(document.querySelector('.composer-popup-note')?.textContent).toBe('No referenceable agent blocks');
+    expect(popupTokens()).toEqual(['#IT1', '#RH1']);
 });
 
 it('shows an explicit error when the file lookup fails', async () => {

@@ -139,24 +139,49 @@ it('offers only immediate FOLDER rows matching the name prefix', () => {
     expect(folderPathsOf(['src/', 'src/'], { directory: '.', prefix: '' })).toEqual(['src/']);
 });
 
-it('marks completed and active blocks that OWN a label as referenceable only', () => {
+// R-TREF (2026-11-26) — THE PICKER GATE, in both halves.
+//
+// The STATUS clause used to stop at `done|running|queued`, which is what made a failed,
+// stopped or cancelled row unreachable even after F11 gave it a valid, unique label. The
+// mandate the labels exist for (verbatim):
+//   "All labels must be valid… all labels must be unique… user using these label to reference
+//    as needed… All thread that started, regardless of failure etc... must be assigned a
+//    proper label."
+// So a terminal row is offered NOW, in step with the server's own relaxation
+// (../../../../underload/harness/src/server/sessions.ts `bindReference`, pinned by
+// underload's src/server/references.test.ts 'terminal references bind'): the two halves moved
+// in one fold, so no chip is minted here that 400s at submit. What a terminal row lacks is a
+// RESULT, and the server composes `referencedResultUnavailableNote` (or the block's recorded
+// content when it has any) instead.
+it('offers every status that owns a label, and only drops what has no address', () => {
     expect(isReferenceableBlock(block())).toBe(true);
     expect(isReferenceableBlock({ status: 'running', label: 'IT1', turnId: 't1', agent: 'instruct' })).toBe(true);
     expect(isReferenceableBlock({ status: 'queued', label: 'IT1', turnId: 't1', agent: 'instruct' })).toBe(true);
-    expect(isReferenceableBlock({ status: 'error', label: 'IT1', turnId: 't1', agent: 'instruct' })).toBe(false);
-    expect(isReferenceableBlock({ status: 'cancelled', label: 'IT1', turnId: 't1', agent: 'instruct' })).toBe(false);
 
-    // F6 (2026-11-25): a status alone no longer makes a block referenceable — it must own an
-    // ADDRESS. `T?` is `UNADDRESSABLE_BLOCK_LABEL` (../../shared/agent-results.ts:270): the
-    // identity of a threadFork branch run, or of a `delegate` placeholder whose child never
-    // started. It deliberately fails `AGENT_REFERENCE_LABEL_PATTERN` (`/^[A-Z]{2}\d+$/`), so
-    // `#T?` resolves through no door on either side. Without this gate the picker offers the
-    // chip, the chip serializes into `SubmitTaskRequest.references`, and the server's
+    // The relaxation itself: the two terminal states, stated as the rows the operator most
+    // needs to name — a child that failed, a run that was stopped.
+    expect(isReferenceableBlock({ status: 'error', label: 'IT1', turnId: 't1', agent: 'instruct' })).toBe(true);
+    expect(isReferenceableBlock({ status: 'cancelled', label: 'IT1', turnId: 't1', agent: 'instruct' })).toBe(true);
+    // …and the same on a NESTED row, which is where a never-started delegation attempt lives
+    // (`call:<callId>` identity, its own ordinal — underload binds it by that pair).
+    expect(
+        isReferenceableBlock({ status: 'error', label: 'HR2', threadId: 'call:d9', turnId: 't1', agent: 'helper' })
+    ).toBe(true);
+
+    // F6 (2026-11-25), still the real filter: a block must own an ADDRESS. `T?` is
+    // `UNADDRESSABLE_BLOCK_LABEL` (../../shared/agent-results.ts): the identity of a
+    // threadFork branch run under the OLD rules, or of a placeholder that had no label at all.
+    // It deliberately fails `AGENT_REFERENCE_LABEL_PATTERN` (`/^[A-Z]{2}\d+$/`), so `#T?`
+    // resolves through no door on either side. Without this clause the picker offers the chip,
+    // the chip serializes into `SubmitTaskRequest.references`, and the server's
     // `readAgentResultReferenceList` rejects the WHOLE request with a 400 — one unaddressable
     // token would sink a message that also carries real references.
     expect(isReferenceableBlock(block({ label: 'T?' }))).toBe(false);
     expect(isReferenceableBlock(block({ label: 'T?', status: 'running' }))).toBe(false);
     expect(isReferenceableBlock(block({ label: 'T?', status: 'queued' }))).toBe(false);
+    // F11 removed `T?` from the projection, so this clause is now a door for a LEGACY record
+    // (a document written before F11 still carries the placeholder) and for anything hand-built.
+    expect(isReferenceableBlock(block({ label: 'T?', status: 'error' }))).toBe(false);
     // The gate is the shared parser, not a special-case for `T?`: any text outside the label
     // grammar is unaddressable, so a fabricated near-match cannot slip through either.
     expect(isReferenceableBlock(block({ label: '' }))).toBe(false);
@@ -164,6 +189,39 @@ it('marks completed and active blocks that OWN a label as referenceable only', (
     expect(isReferenceableBlock(block({ label: 'branch-3' }))).toBe(false);
     // A real ordinal is referenceable even on a row that also carries an id-shaped identity.
     expect(isReferenceableBlock(block({ label: 'IT12', threadId: 'call:d9' }))).toBe(true);
+});
+
+// A chip the picker may offer must survive the whole wire path: descriptor → chip data
+// attributes → the de-duplicating submit reader → the EXACT reference object the server binds.
+// Pinned for the terminal rows specifically, because those are the chips this change creates:
+// a chip that serializes to a malformed or partial reference is a chip that fails at submit.
+it('serializes a terminal row into the same reference the server binds', () => {
+    const failed = block({ turnId: 'turn-9', threadId: 'call:d9', label: 'hr2', agent: 'helper', status: 'error' });
+    const stopped = block({ turnId: 'turn-9', label: 'IT7', status: 'cancelled' });
+
+    // The chip carries the binding as data attributes, so a submit can be rebuilt from the DOM.
+    expect(referenceChipOf(failed)).toEqual({
+        kind: 'reference',
+        id: 'reference:turn-9:call:d9:HR2',
+        label: '#HR2',
+        data: { referenceTurn: 'turn-9', referenceThread: 'call:d9', referenceLabel: 'HR2' }
+    });
+
+    const chips = [
+        { kind: 'reference', dataset: referenceChipOf(failed).data as Record<string, string> },
+        // The same block picked twice is ONE reference (the submit de-duplicates).
+        { kind: 'reference', dataset: referenceChipOf(failed).data as Record<string, string> },
+        { kind: 'reference', dataset: referenceChipOf(stopped).data as Record<string, string> }
+    ];
+
+    expect(referencesOfChips(chips)).toEqual([
+        { turnId: 'turn-9', threadId: 'call:d9', label: 'HR2' },
+        { turnId: 'turn-9', label: 'IT7' }
+    ]);
+
+    // Every label that reaches the wire is a valid address: the server's list reader would
+    // otherwise reject the ENTIRE request, not just this reference.
+    for (const reference of referencesOfChips(chips)) expect(reference.label).toMatch(/^[A-Z]{2}\d+$/);
 });
 
 it('reads file paths defensively and filters them for the exact query', () => {

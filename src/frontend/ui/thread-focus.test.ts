@@ -88,14 +88,19 @@ describe('persistent thread identity on tiles (S6)', () => {
         // R8: an unlabeled roster row shows its agent-prefixed fallback, never `T7`.
         expect(badgeOf(sequenced.element)?.textContent).toBe('WR7');
         expect(badgeOf(labelled.element)?.textContent).toBe('Research');
-        expect(badgeOf(unknown.element)?.textContent).toBe('T?');
+        // F11 (2026-11-26): a thread the roster does not describe is named by ITS OWN ID, not by
+        // the `T?` placeholder (which is removed): the id is unique, it is the figure `data-thread-id`
+        // and the title already publish, and no `#` lookup is derived from an id — so the reader can
+        // tell the three unnamed conversations apart, which one shared `T?` never allowed.
+        expect(badgeOf(unknown.element)?.textContent).toBe('thread-999');
         expect(badgeOf(unknown.element)?.title).toBe('Thread thread-999');
     });
 
     it('repaints the badge when the roster arrives after adoption', () => {
         const { board } = mount();
         const turn = board.adopt(turnRecord({ id: 'turn-1', index: 0, threadId: 'thread-4' }));
-        expect(badgeOf(turn.element)?.textContent).toBe('T?');
+        // F11: the id until the roster names the conversation (see the case above).
+        expect(badgeOf(turn.element)?.textContent).toBe('thread-4');
 
         board.setThreads([threadEntry({ id: 'thread-4', sequence: 4, label: 'Planner', agent: 'research' })]);
 
@@ -142,10 +147,14 @@ describe('persistent thread identity on tiles (S6)', () => {
             hidden: badgeOf(turn.element)?.hidden
         }));
 
+        // F11: the shared badge TEXT is now each conversation's own id (the roster describes none
+        // of them), and the GROUPING property this test owns is unchanged — two turns of
+        // `thread-1` still wear the same figure, and a different conversation wears its own. The
+        // old `T?` could not express that difference at all.
         expect(badges).toEqual([
-            { threadId: 'thread-1', text: 'T?', hidden: false },
-            { threadId: 'thread-1', text: 'T?', hidden: false },
-            { threadId: 'thread-2', text: 'T?', hidden: false },
+            { threadId: 'thread-1', text: 'thread-1', hidden: false },
+            { threadId: 'thread-1', text: 'thread-1', hidden: false },
+            { threadId: 'thread-2', text: 'thread-2', hidden: false },
             // Legacy turn: no identity, so no badge (never an invented thread).
             { threadId: undefined, text: '', hidden: true }
         ]);

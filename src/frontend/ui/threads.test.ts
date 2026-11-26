@@ -243,10 +243,12 @@ describe('thread labels', () => {
 
         expect(threadLabelOf('thread-3', roster)).toBe('Research');
         expect(threadLabelOf('conv/3', roster)).toBe('WR7');
-        // Unknown ids are explicit, and two long non-numeric ids do NOT collide on a
-        // truncated token.
-        expect(threadLabelOf('invocation-alpha', roster)).toBe('T?');
-        expect(threadLabelOf('invocation-beta', roster)).toBe('T?');
+        // F11 (2026-11-26): an unknown id is named BY ITS ID — the `T?` placeholder is removed, and
+        // two long non-numeric ids now read differently, which is exactly what the mandate buys
+        // (a dozen rows sharing one `T?` were indistinguishable; the id is also what
+        // `data-thread-id` and the badge title print, so no second vocabulary is invented).
+        expect(threadLabelOf('invocation-alpha', roster)).toBe('invocation-alpha');
+        expect(threadLabelOf('invocation-beta', roster)).toBe('invocation-beta');
         expect(threadLabelOf(undefined, roster)).toBeUndefined();
     });
 

@@ -1,4 +1,5 @@
-// F10 (2026-11-26) — A COMPILED ROW'S IDENTITY ARRIVES, OR THE ROW SAYS `T?`.
+// F10 (2026-11-26) / F11 (2026-11-26) — A COMPILED ROW'S IDENTITY ARRIVES, OR THE ROW MINTS A
+// PROVISIONAL ADDRESS. NOTHING ON THE BOARD READS `T?` ANY MORE.
 //
 // THE DEFECT (R10.1 + R10.5, measured on the operator's own session `Temp/agenttools/snapshot/
 // session.json`, turn `caaa372e…`, reproduced end-to-end through the real server fold and the
@@ -9,28 +10,42 @@
 // `IT13`, `WE1`, `IT14`, `IT15`, `IT16`. Those numbers were:
 //   - FABRICATED — no conversation answers to them, and no `#` reference resolves them;
 //   - UNRECOVERABLE — the end-of-turn retraction sweep only fires for a row with a `callId`
-//     (`setState`, turns.ts:5386) and a compiled row has none (`compiledEntryOf` passes
+//     (`setState`, ui/turns.ts) and a compiled row has none (`compiledEntryOf` passes
 //     `callId: undefined`), so the eager mint was never refunded, while the shared projection
 //     fed exactly those numbers into the durable `labelHighWater` (that half is R10.3, pinned in
 //     ../agent-results-block-identity.test.ts);
 //   - and the rows whose label the wire DID author arrived as an EMPTY `.thread-name`, because
-//     `paintCompiledSection` only paints a non-empty `agentLabel` (turns.ts:9698).
+//     `paintCompiledSection` only paints a non-empty `agentLabel`.
+//
+// F10's answer was "consume nothing, read `T?`". F11 REMOVES THE TOKEN, on the operator's direct
+// mandate ("All labels must be valid. Cannot have T? or T- etc… all labels must be unique… user
+// using these label to reference as needed, and having a bunch of T? means they cannot reference
+// specific one"), and the answer is now:
+//   - an unnamed compiled row mints a PROVISIONAL ordinal and shows it (`clientLabel`) — the row
+//     is citable, and `paintCompiledSection` hands the number back the moment the wire authors a
+//     real one, so F10's unrecoverable leak is still gone;
+//   - a branch row displays the CONVERSATION it forked from (`labelShared`, the twin of
+//     ../../shared/agent-results.ts `branchSharedLabelOf`), and keeps its `branch-N` badge, which
+//     is what tells two forks of one conversation apart;
+//   - a row with no address of its own shows the record's better identity (`branchId` →
+//     `invocationId` → F11's `callId`) in a separate `.thread-runid` badge — beside its name,
+//     never instead of it.
 //
 // WHAT IS PINNED HERE (the requirement, not an observation):
-//   I1. a compiled row consumes NO ordinal — ever. Its name is exactly one of: its own
-//       `TurnSection.agentLabel`, the roster join's conversation code, or `T?`;
-//   I2. a compiled row's identity figures still RESERVE their number, so the numbering after a
-//       replayed turn continues where the SERVER'S names left off (the wire label is as
-//       authoritative here as `turn.threadLabel` has always been);
-//   I3. a row that genuinely owns no address reads `T?` AND states the record's better identity
-//       (`branchId`, else `invocationId`) in a separate `.thread-runid` badge — never in the
-//       name slot, which must stay unaddressable (`T?`), never an invented `IT13`;
-//   I4. a row the wire or the roster DOES name wears that address and gets NO badge, so the
-//       common row's DOM, width and column alignment are byte-identical to the pre-F10 board
-//       (the shape ./turns-thread-repeat-labels.test.ts pins);
+//   I1. a compiled row's name is exactly one of: its own `TurnSection.agentLabel`, the roster
+//       join's conversation code, the conversation a branch borrows, or a provisional mint — and
+//       NEVER a placeholder or the empty string (asserted by the name text of every fixture);
+//   I2. an identity that ARRIVES still RESERVES its number, so the numbering after a replayed turn
+//       continues where the SERVER'S names left off; a provisional mint reserves its number too
+//       (F11: what is on screen is what is reserved) — the leak F10 fixed is that a mint no row
+//       displays any more is refunded, and that refund is pinned here;
+//   I3. a row that owns no address of its own states the identity the record DOES hold, in a
+//       separate badge, and the badge never moves into the name slot;
+//   I4. a row the wire or the roster DOES name wears that address and gets NO badge, so the common
+//       row's DOM, width and column alignment are byte-identical to the pre-F10 board (the shape
+//       ./turns-thread-repeat-labels.test.ts pins);
 //   I5. the identity is on the row as DATA (`data-thread-identity`) in every state that has one,
-//       including the rows whose repeated code the R7/D2 rule withdraws — an exchange of a
-//       conversation the card above already speaks for is still identifiable.
+//       including the rows whose repeated code the R7/D2 rule withdraws.
 //
 // The badge is measured through the SHIPPED stylesheet (the device ./turns-thread-empty-rows.test.ts
 // and ./turns-thread-repeat-labels.test.ts use), so "a reader can see it" is jsdom's answer and
@@ -213,8 +228,13 @@ const painted = (node: HTMLElement | null | undefined): boolean => {
     return (node.textContent ?? '').trim().length > 0;
 };
 
-describe('I1/I2 — a compiled row never spends the conversation numbering', () => {
-    it('paints T? and burns NOTHING when the wire authored no label', () => {
+// F11: the token this file used to pin as an honest state. It must not come back in ANY name
+// slot of any fixture, so every case below asserts a real address instead and this guard makes
+// the mandate a property of the whole file rather than of one assertion.
+const PLACEHOLDER = 'T?';
+
+describe('I1/I2 — a compiled row is named, and reserves what it shows', () => {
+    it('mints a provisional address when the wire authored no label, and refunds it when the label lands', () => {
         const board = mount();
 
         render(
@@ -226,20 +246,44 @@ describe('I1/I2 — a compiled row never spends the conversation numbering', () 
 
         const row = rowOf(board, 't1:1');
 
-        // The honest unknown, NOT a minted `HR1`. An empty name is equally wrong: the row would
-        // render nothing at all in the identity slot.
-        expect(nameText(row)).toBe('T?');
+        // F11: `HR1`, the provisional ordinal this board minted — NOT `T?` and NOT the empty name
+        // F10 left behind. The row occupies the board, so it carries an address the operator can
+        // type; `clientLabel` marks it as refundable, which the second half of this case pins.
+        expect(nameText(row)).toBe('HR1');
+        expect(nameText(row)).not.toBe(PLACEHOLDER);
 
-        // THEN: the number is still in circulation. A later tile's REAL `helper` run is `HR1`,
-        // because the replayed row never took it. (Before F10 the compiled row minted `HR1` and
-        // this read `HR2` — the gap the operator's `labelHighWater` recorded as `WE:12`/`RR:11`
-        // while the conversation join stopped at WE11/RR10.)
+        // A provisional mint IS displayed, so it reserves its number while it is on screen (V6 of
+        // the shared contract): a later tile's `helper` run continues AFTER it, and does not
+        // collide with the row the operator can see.
         const live = board.begin('next', 'turn-b', 1);
 
         live.apply({ type: 'start', agent: 'helper', model: 'm1' } as never);
         live.flush();
 
-        expect(live.element.querySelector('.tile-agent')?.textContent).toBe('HR1');
+        expect(live.element.querySelector('.tile-agent')?.textContent).toBe('HR2');
+
+        // THE REFUND (what F10 actually fixed): when the wire DOES author the label, the compiled
+        // row repaints to the server's name and the provisional ordinal goes back to the tile. A
+        // third tile's `helper` run therefore continues after the SERVER's number (`HR2`), and the
+        // provisional mint is not a scar in the numbering.
+        render(
+            board,
+            viewOf({
+                t1: rootSection('t1', [child('t1:1', { agent: 'helper', agentLabel: 'HR3', threadId: 'th-h3' })]),
+                t2: rootSection('t2', [child('t2:1', { agent: 'helper', agentLabel: 'HR4', threadId: 'th-h4' })])
+            })
+        );
+
+        expect(nameText(rowOf(board, 't1:1'))).toBe('HR3');
+
+        const third = board.begin('third', 'turn-c', 2);
+
+        third.apply({ type: 'start', agent: 'helper', model: 'm1' } as never);
+        third.flush();
+
+        // The floor the wire's `HR3`/`HR4` set is what answers here: the mint was refunded, and the
+        // sequence never re-wears a displayed number.
+        expect(third.element.querySelector('.tile-agent')?.textContent).toBe('HR5');
     });
 
     it('reserves a label the WIRE authored, so the numbering continues after a replayed turn', () => {
@@ -268,12 +312,12 @@ describe('I1/I2 — a compiled row never spends the conversation numbering', () 
     });
 });
 
-describe('I3 — a row with no address says so, and states the identity it does have', () => {
-    it('badges a threadless run with its recorded invocation id, name still T?', () => {
+describe('I3 — a row with no address of its own states the identity it does have', () => {
+    it('carries its recorded invocation id as data, beside its provisional name', () => {
         const board = mount();
 
-        // The R10.5 pair, in the shape the reviewer could not read: the run cannot be addressed
-        // (no label, no conversation), but the record is not silent — it knows `inv-3`.
+        // The R10.5 pair, in the shape the reviewer could not read: the run has no CONVERSATION,
+        // but the record is not silent — it knows `inv-3`.
         render(
             board,
             viewOf({
@@ -283,14 +327,14 @@ describe('I3 — a row with no address says so, and states the identity it does 
 
         const row = rowOf(board, 't1:1');
 
-        expect(nameText(row)).toBe('T?');
-        expect(badgeText(row)).toBe('inv-3');
+        // F11: the name is the row's own provisional ordinal, and the record's id rides as the
+        // row's IDENTITY DATA. No `.thread-runid` badge is painted, because the row wears a real
+        // address (I4's rule, unchanged since F10): the badge belongs to rows whose name is NOT
+        // their own, and a fabricated-but-owned ordinal is one the operator can type.
+        expect(nameText(row)).toBe('HR1');
+        expect(badge(row)).toBeNull();
         expect(row.dataset.threadIdentity).toBe('inv-3');
-
-        // The badge is a figure a reader can see (styles.css `.thread-runid`) — that is the whole
-        // point of R10.5 — and it sits in the identity half of the row, before the preview.
-        expect(painted(badge(row))).toBe(true);
-        expect(selectChildren(row)).toEqual(['thread-name', 'thread-runid', 'thread-preview', 'thread-top']);
+        expect(selectChildren(row)).toEqual(['thread-name', 'thread-preview', 'thread-top']);
     });
 
     it('badges a threadFork branch with its branch id, which outranks the run id', () => {
@@ -313,16 +357,22 @@ describe('I3 — a row with no address says so, and states the identity it does 
 
         expect(badgeText(row)).toBe('branch-3');
         expect(row.dataset.threadIdentity).toBe('branch-3');
-        // A branch is not addressable, so the name slot stays `T?` (I1) — the badge is the
-        // supplement, never a replacement.
-        expect(nameText(row)).toBe('T?');
+        // F11: a branch is not the conversation's OWNER, so it DISPLAYS the conversation's code —
+        // the label of the flow this turn runs (`IT1`, the root section's own address), the twin of
+        // ../../shared/agent-results.ts `branchSharedLabelOf` / `labelSource: 'shared'`. `T?` is
+        // gone, and the `branch-3` badge above is what separates two forks of one conversation. A
+        // bare `#IT1` still resolves to the conversation's OWN block, because the threadless label
+        // lookup skips a `shared` row.
+        expect(nameText(row)).toBe('IT1');
     });
 
-    it('renders NO badge and NO data when the record holds no identity at all', () => {
+    it('mints its own name and NO badge when the record holds no identity at all', () => {
         const board = mount();
 
-        // The five rows of the operator's turn that carried literally nothing: an empty name is
-        // then the ONLY honest state, and inventing a badge would be inventing an id.
+        // The five rows of the operator's turn that carried literally nothing. F10 called the empty
+        // name "the only honest state"; F11 rejects it — a rendered row must show something the
+        // reader can point at, and inventing a BADGE would be the only lie (an id the record does
+        // not hold). So: a provisional ordinal, and no badge.
         render(
             board,
             viewOf({
@@ -332,10 +382,19 @@ describe('I3 — a row with no address says so, and states the identity it does 
 
         const row = rowOf(board, 't1:1');
 
-        expect(nameText(row)).toBe('T?');
+        expect(nameText(row)).toBe('WE1');
         expect(badge(row)).toBeNull();
         expect(row.dataset.threadIdentity).toBeUndefined();
         expect(selectChildren(row)).toEqual(['thread-name', 'thread-preview', 'thread-top']);
+
+        // And the number it displays is RESERVED while it is displayed — the operator's `WE:12`
+        // leak is not back: this is one occurrence, and the next `workspace` run reads `WE2`.
+        const live = board.begin('next', 'turn-b', 1);
+
+        live.apply({ type: 'start', agent: 'workspace', model: 'm1' } as never);
+        live.flush();
+
+        expect(live.element.querySelector('.tile-agent')?.textContent).toBe('WE2');
     });
 });
 
@@ -377,9 +436,12 @@ describe('I4/I5 — an address beats the badge, and the data outlives it', () =>
 
         const before = rowOf(board, 't1:1');
 
-        // No wire label and no roster yet: the row is honest about owning no address.
-        expect(nameText(before)).toBe('T?');
-        expect(badgeText(before)).toBe('inv-we7-1');
+        // F11: no wire label and no roster yet — the row wears its provisional ordinal, and the
+        // run id the record does hold rides as the row's identity DATA. It is citable from the
+        // first frame, which is the change; no badge, because the provisional name IS an address.
+        expect(nameText(before)).toBe('WE1');
+        expect(badge(before)).toBeNull();
+        expect(before.dataset.threadIdentity).toBe('inv-we7-1');
 
         const roster: SessionThreadEntry[] = [
             {
@@ -403,8 +465,9 @@ describe('I4/I5 — an address beats the badge, and the data outlives it', () =>
 
         const row = rowOf(board, 't1:1');
 
-        // The join's conversation code REPLACES the unknown (it always did) and the badge goes
-        // with it: a row that wears `WE7` needs no second identity figure.
+        // The join's conversation code REPLACES the provisional mint (it always replaced the
+        // unknown) and the badge goes with it: a row that wears `WE7` needs no second identity
+        // figure — and the provisional `WE1` was refunded, which is what keeps `WE2` free.
         expect(nameText(row)).toBe('WE7');
         expect(badge(row)).toBeNull();
         expect(row.dataset.persistentThread).toBe('th-we7');
@@ -442,5 +505,65 @@ describe('I4/I5 — an address beats the badge, and the data outlives it', () =>
         // The card keeps its readable code — exactly one copy per conversation (R6/R7).
         expect(painted(card.querySelector<HTMLElement>('.thread-name'))).toBe(true);
         expect(card.dataset.threadIdentity).toBe('inv-h1');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// F11 — THE MANDATE, AS A WHOLE-FILE PROPERTY. Two rows of one board never wear the same name
+// unless one of them is a branch's shared copy, and no name slot on any of the fixtures above
+// carries the retired placeholder. A mixed fleet (a labelled run, an unattributed run, a branch
+// and the tile's own conversation) is the shape the operator's turn had, and the exact expected
+// set is written out rather than measured.
+// ---------------------------------------------------------------------------
+
+describe('F11 — every rendered row is named, and no two rows share a name', () => {
+    it('names the mixed fleet with four distinct addresses and no placeholder', () => {
+        const board = mount();
+
+        render(
+            board,
+            viewOf({
+                t1: rootSection('t1', [
+                    // the wire named this one
+                    child('t1:1', { agent: 'helper', agentLabel: 'HR9', threadId: 'th-h9', invocationId: 'inv-h9' }),
+                    // the wire named nothing at all
+                    child('t1:2', { agent: 'workspace' }),
+                    // a fork of the turn's own conversation
+                    child('t1:3', {
+                        agent: 'instruct',
+                        branchId: 'branch-9',
+                        invocationId: 'branch-9',
+                        threadId: 'th-instruct'
+                    })
+                ])
+            })
+        );
+
+        const names = ['t1:1', 't1:2', 't1:3'].map((key) => nameText(rowOf(board, key)));
+
+        // Exact, in tree order: the wire's own code, the workspace row's provisional mint, and the
+        // branch's SHARED copy of the conversation's address.
+        expect(names).toEqual(['HR9', 'WE1', 'IT1']);
+        expect(names.every((name) => name.length > 0 && name !== PLACEHOLDER)).toBe(true);
+        // The branch row is an EXCHANGE of its own conversation (the tile's root flow is that
+        // conversation's card), so the R7/D2 rule withdraws the repeated CODE the same way it
+        // withdraws it from a second run of one conversation (./turns-thread-repeat-labels.test.ts)
+        // — and the row still identifies itself, because the badge and `data-thread-identity` carry
+        // `branch-9`. That is the F11 bargain: the name slot is never a placeholder, and the figure
+        // that distinguishes two forks is the record's own id, not an invented number.
+        const branchRow = rowOf(board, 't1:3');
+
+        expect(painted(branchRow.querySelector<HTMLElement>('.thread-name'))).toBe(false);
+        expect(painted(badge(branchRow))).toBe(true);
+        expect(branchRow.dataset.threadExchange).toBe('th-instruct');
+        expect(branchRow.dataset.threadIdentity).toBe('branch-9');
+        // The only repeat allowed among the nested rows is the branch's borrowed copy — and it is
+        // the CONVERSATION'S number, so it burned nothing: the workspace mint is `WE1`, the first of
+        // its code. (The tile's own root row is the fourth row of this turn and wears `IT1` as the
+        // conversation's OWNER; the threadless `#IT1` lookup skips the branch's `shared` copy, so it
+        // still resolves to that root block — pinned against the real block list in
+        // ./turns-threads.test.ts and in
+        // ../../../../underload/harness/src/engine/shared/agent-results-block-identity.test.ts.)
+        expect(new Set(names).size).toBe(3);
     });
 });

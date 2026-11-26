@@ -316,15 +316,16 @@ describe('fork / autoanswer branch rows', () => {
         expect(row.querySelector('.thread-preview')?.textContent).toBe('fork of this thread');
         // The block uses the existing agent label allocator, never a raw agent id.
         //
-        // F6 (2026-11-25, deliberate expectation change): the code is `T?`
-        // (`UNKNOWN_THREAD_LABEL`), not `WR2`. A threadFork branch can never BE a durable
-        // conversation, so the ordinal the allocator used to burn for it was an address nothing
-        // answered to — the shared projection says the same for this run
-        // (`UNADDRESSABLE_BLOCK_LABEL`, ../../shared/agent-results.ts:630-661), and ui/turns.ts
-        // `mintThreadLabel` now agrees; the writer's own root row still keeps `WR1`, and the
-        // freed number goes to the next run that CAN own one
-        // (ui/turns-thread-unaddressed-labels.test.ts). Still never a raw agent id.
-        expect(row.querySelector('.thread-name')?.textContent).toBe('T?');
+        // F11 (2026-11-26, deliberate expectation change): the code is `WR1` — the address of the
+        // conversation this branch forked from — and not `T?`, a token that no longer exists. A
+        // threadFork branch is part of its parent's conversation, so it DISPLAYS that
+        // conversation's address without owning or burning it (`labelSource: 'shared'`,
+        // ../../shared/agent-results.ts `branchSharedLabelOf`; ui/turns.ts `branchSharedLabelOf`
+        // → `labelShared`), and the writer's next conversation still reads `WR2` with no gap
+        // (ui/turns-thread-unaddressed-labels.test.ts). Because two forks of one conversation
+        // would then read identically, the row carries its `branch-1` figure as an identity badge
+        // (`data-thread-identity`, ui/turns.ts `paintEntryIdentity`). Still never a raw agent id.
+        expect(row.querySelector('.thread-name')?.textContent).toBe('WR1');
         expect(row.textContent).not.toContain('writer');
 
         // The branch's own first event carries thread.id = branchId and must reuse
@@ -374,12 +375,13 @@ describe('fork / autoanswer branch rows', () => {
         expect(row.querySelector<HTMLElement>('.thread-kind')?.dataset.kind).toBe('autoanswer');
         expect(row.querySelector('.thread-preview')?.textContent).toBe('automatic owner answer');
         // The owner fork runs as the owner agent (writer), not the requester (helper).
-        // F6 (2026-11-25, deliberate expectation change): its code is `T?` — an
-        // `autoanswer` branch owns no durable conversation either, so it takes no ordinal from
-        // the writer sequence (see the fork case above, and ../../shared/agent-results.ts:630-661
-        // for the rule this mirrors). The agent IDENTITY is still writer's: the row's colour and
-        // `data-agent` come from `branch.agent`, which is what "runs as the owner agent" means.
-        expect(row.querySelector('.thread-name')?.textContent).toBe('T?');
+        // F11 (2026-11-26, deliberate expectation change): its code is `WR1`, the owner
+        // conversation's address — an `autoanswer` branch is a fork of that conversation, so it
+        // borrows the address instead of burning an ordinal (see the fork case above, and
+        // ../../shared/agent-results.ts `branchSharedLabelOf` for the rule this mirrors). The
+        // agent IDENTITY is still writer's: the row's colour and `data-agent` come from
+        // `branch.agent`, which is what "runs as the owner agent" means.
+        expect(row.querySelector('.thread-name')?.textContent).toBe('WR1');
 
         turn.apply({
             type: 'branch_end',
@@ -392,7 +394,15 @@ describe('fork / autoanswer branch rows', () => {
 
         expect(row.dataset.state).toBe('error');
         expect(row.querySelector('.thread-outcome')?.textContent).toBe('error · fork failed');
-        expect(row.textContent).not.toContain('branch-2');
+        // F11 (2026-11-26, deliberate expectation change): the row still shows NO raw id in its
+        // NAME slot (`WR1`, its conversation's address) — but the `branch-2` figure IS on the row
+        // now, as the identity badge R10.5 exists for: two forks of one conversation both wear the
+        // conversation's code, so the recorded branch id is what tells them apart. F10's "never the
+        // raw id anywhere" rule existed because the only alternative was `T?`; F11 removed the
+        // token, so the badge is the honest supplement rather than a leak.
+        expect(row.textContent).toContain('branch-2');
+        expect(row.querySelector('.thread-runid')?.textContent).toBe('branch-2');
+        expect(row.dataset.threadIdentity).toBe('branch-2');
     });
 
     it('nests a branch under its source thread without a second block shape', () => {

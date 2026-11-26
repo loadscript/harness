@@ -107,7 +107,9 @@ import type {
     SessionTurn
 } from '../../server/protocol';
 import type { ThreadTranscriptPayload } from '../view-model';
-import { UNKNOWN_THREAD_LABEL, invalidThreadsOf, threadNameOf, turnThreadIdOf } from './threads';
+// F11: `UNKNOWN_THREAD_LABEL` (the `T?` placeholder) is gone from ui/threads.ts, so this
+// import carries only the helpers that derive an identity from a roster entry.
+import { invalidThreadsOf, threadNameOf, turnThreadIdOf } from './threads';
 import type { InvalidThreadRecord, SessionThreadEntry } from './threads';
 // The store's own run-key rule, shared by the server's attribution map and this fold. W22 uses it to
 // rebuild `id\0epoch` from the two BARE fields the roster publishes, so the composite never travels on a
@@ -661,8 +663,11 @@ const invalidThreadOf = (snapshot: SessionSnapshot, threadId: string): InvalidTh
 
 // Header identity for either surface. The raw roster wins; a conversation named ONLY
 // in `invalidThreads` has no `SessionThread`, so its server label is the next
-// authority and `UNKNOWN_THREAD_LABEL` (ui/threads.ts) is the codebase's honest
-// "no roster identity" token — never an invented ordinal.
+// authority. F11 (2026-11-26) replaced the last fallback — the `UNKNOWN_THREAD_LABEL`
+// placeholder — with the thread id itself: a header must show something the reader can
+// point at, the id is already unique, and it is the same figure every other surface of
+// this dialog prints (`data-thread-id`, the route). Never an invented ordinal: this
+// surface has no evidence for one.
 type TranscriptIdentity = {
     threadId: string;
     name: string;
@@ -678,7 +683,7 @@ const identityOf = (snapshot: SessionSnapshot, threadId: string, invalid?: Inval
 
     return {
         threadId,
-        name: invalid?.label ?? UNKNOWN_THREAD_LABEL,
+        name: invalid?.label ?? threadId,
         agent: invalid?.agent ?? '',
         status: 'unknown'
     };

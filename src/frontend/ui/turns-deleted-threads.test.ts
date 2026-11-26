@@ -281,7 +281,7 @@ describe('F7 — rows of a soft-deleted conversation', () => {
 
         // The roster names only the host, so the delegated runs have NO persistent thread
         // (the placeholder case the board legitimately renders for a conversation it was
-        // never told about, ./threads.ts `UNKNOWN_THREAD_LABEL`).
+        // never told about — F11 names such a row by its id, ../ui/threads.ts `threadNameOf`).
         board.setThreads([threadEntry({ id: 'thread-13', sequence: 1, label: 'IT4', invocationId: 'inv-13' })]);
         board.hydrate(hostTurns());
 

@@ -391,9 +391,8 @@ export const sessionThreadsOf = (session: unknown): SessionThreadEntry[] => {
     //      label and invocation ids are not knowable from a bare id, and nothing needs them — the
     //      entry exists only to carry the marker into `deletedThreadIdsOf`, while the row it hides
     //      comes from the compiled display tree, which names the thread itself
-    //      (ui/turns.ts `paintCompiledSection` → `learnedThreads`). Its label is the explicit unknown
-    //      token, so a retired id consumes NO per-agent ordinal and cannot renumber a live
-    //      conversation's name.
+    //      (ui/turns.ts `paintCompiledSection` → `learnedThreads`). Its label is its own id, so a
+    //      retired id consumes NO per-agent ordinal and cannot renumber a live conversation's name.
     const retiredIds = inactiveThreadIdsOf(session);
     for (const id of retiredIds) {
         const existing = threads.find((entry) => entry.id === id);
@@ -405,9 +404,10 @@ export const sessionThreadsOf = (session: unknown): SessionThreadEntry[] => {
                 origin: 'host',
                 status: 'idle',
                 sequence: threads.length + 1,
-                // `UNKNOWN_THREAD_LABEL` is this module's declared token for "identity not known"
-                // (declared below; this runs after module init, so the const is already bound).
-                label: UNKNOWN_THREAD_LABEL,
+                // F11: the id IS the name. This entry has no agent and no ordinal, and the
+                // retired list carries bare ids only, so nothing more specific is knowable —
+                // `threadNameOf` (below) answers the same shape with the same figure.
+                label: id,
                 deleted: true
             });
             continue;
@@ -465,7 +465,8 @@ export const sessionThreadsOf = (session: unknown): SessionThreadEntry[] => {
 //
 // What is deliberately NOT evidence: absence from an EMPTY roster (a payload without the list, or a
 // first bind — the board legitimately renders placeholder rows for a conversation it was never told
-// about, see ui/turns.ts `T?` and the projector's `adoptPlaceholder` sections), and a conversation the
+// about, see the placeholder rows ui/turns.ts mints for unnamed runs, and the projector's
+// `adoptPlaceholder` sections), and a conversation the
 // next roster names again WITHOUT a marker — a resume puts the row back and clears the retired list in
 // the same store call (`reactivateThreadRow`, src/server/sessions.ts:5140-5163), so the verdict is
 // re-derived from the newest roster, never remembered past the server's word.
@@ -544,13 +545,25 @@ export const turnThreadIdOf = (turn: unknown): string | undefined => {
 // Display name of a roster entry: the server conversation label when it has one,
 // otherwise an agent-prefixed fallback derived from the entry itself. There is
 // deliberately NO `T<sequence>` fallback: that generic wrapper is exactly the
-// duplicate identity R8 removes. A hand-built entry with no agent at all reads
-// the explicit unknown token.
-export const threadNameOf = (entry: Pick<SessionThreadEntry, 'agent' | 'sequence' | 'label'>): string => {
+// duplicate identity R8 removes.
+//
+// F11 (2026-11-26) — THE LAST SLOT IS THE ID, NEVER A PLACEHOLDER. A hand-built entry that
+// names no agent cannot be given a per-agent ordinal (an ordinal is a promise that the row
+// owns a number in that agent's sequence), and F11 forbids a placeholder token in a label
+// slot: every rendered row must carry something a reader can point at. So the entry's own
+// opaque id is the name — the same figure `data-thread-id`/`title` already publish, hence no
+// second vocabulary — and it is a name NOTHING else can claim, so uniqueness holds. The id
+// fails `agentLabelParts`, which is exactly right: it is a display name, not a mintable
+// address, and no `#` lookup is derived from it.
+export const threadNameOf = (
+    entry: Pick<SessionThreadEntry, 'id' | 'agent' | 'sequence' | 'label'>
+): string => {
     if (entry.label !== undefined && entry.label.trim().length > 0) return entry.label;
 
     const agent = nonEmptyString(entry.agent);
-    return agent === undefined ? UNKNOWN_THREAD_LABEL : `${agentCodeOf(agent)}${entry.sequence}`;
+    if (agent === undefined) return entry.id;
+
+    return `${agentCodeOf(agent)}${entry.sequence}`;
 };
 
 // CANONICAL display identity of a persistent thread (S6).
@@ -559,10 +572,14 @@ export const threadNameOf = (entry: Pick<SessionThreadEntry, 'agent' | 'sequence
 // conversation can never read as `Research` in one place and `T3` in another. The
 // roster's label/sequence is authoritative; ids are opaque and are NEVER parsed for
 // digits (an id with no trailing number would otherwise collide with an unrelated
-// one). A thread the roster does not describe yet shows the explicit unknown token
-// `T?`; its full id stays in `data-thread-id`/`title`.
-export const UNKNOWN_THREAD_LABEL = 'T?';
-
+// one).
+//
+// F11 (2026-11-26) removed the `T?` sentinel this function used to return. A thread the
+// roster does not describe yet is named by the id the roster WOULD have described: ids are
+// already what `data-thread-id`, the tile `title` and the delete prompt print, so the reader
+// gets a figure that is unique, copyable and true instead of one shared placeholder that the
+// operator's session showed a dozen times on one screen. `undefined` still means "no thread
+// identity at all" (the caller then renders nothing).
 export const threadLabelOf = (
     threadId: string | undefined,
     threads: readonly SessionThreadEntry[]
@@ -571,28 +588,36 @@ export const threadLabelOf = (
 
     const entry = threads.find((candidate) => candidate.id === threadId);
 
-    return entry === undefined ? UNKNOWN_THREAD_LABEL : threadNameOf(entry);
+    return entry === undefined ? threadId : threadNameOf(entry);
 };
 
-// F10 / R10.5 — the record's BETTER IDENTITY for a row whose name cannot be an address.
+// F10 / R10.5 — the record's BETTER IDENTITY for a row whose name is not its own address.
 //
-// A run that owns no conversation reads `T?` (`UNKNOWN_THREAD_LABEL`), which is honest but
-// tells the reader nothing about WHICH run that was — the reviewer measured a dozen such rows
-// on one turn of the operator's session, "some are empty in total". This helper answers the
-// narrow question "what is the best id this record actually holds for this row", and the tile
-// paints it as a separate badge so the address slot (`T?`) is never faked into looking like a
-// mintable ordinal:
-//   1. `branchId` — the recorded `threadFork` branch (`branch-5`); a branch run is exactly the
-//      case that can never own an address, and this is the one figure that names it;
+// F10 painted `T?` in the name slot and this figure beside it. F11 (2026-11-26) removed the
+// placeholder, so the figure is now the fallback NAME for the runs nothing else can name, and
+// it is still painted as a badge beside a SHARED address (a fork row wears its conversation's
+// label, and `branch-5` is what tells the two fork rows apart). The reviewer's complaint that
+// started it — "some are empty in total" — is answered either way: this is the best id the
+// record actually holds for the run.
+//
+// THE ORDER, most specific first:
+//   1. `branchId` — the recorded `threadFork` branch (`branch-5`); a branch run is the case
+//      that can never OWN an address, and this is the one figure that names it;
 //   2. `invocationId` — the runtime run id, when the caller has one and there is no branch;
-//   3. nothing at all → undefined, and the caller renders NO badge (never an empty pill).
+//   3. F11: `callId` — a delegation whose child NEVER STARTED has no invocation id at all
+//      (no `thread` frame ever named it), and the spawning call's id is the only recorded
+//      figure that says WHICH call this row is. Before F11 these rows had a `T?` name and no
+//      badge; now the row's name is its minted ordinal and this is the detail.
+//   4. nothing at all → undefined, and the caller renders NO badge (never an empty pill).
 // Deliberately NOT the persistent `threadId` of a branch: on the operator's session the three
 // `branch-N` sections all carry the PARENT's `threadId` (`thread-52`), so showing it would
 // suggest the branch IS that conversation — the mislabelling R10.4 is about.
 export const threadIdentityOf = (identity: {
     branchId?: string;
     invocationId?: string;
-}): string | undefined => nonEmptyString(identity.branchId) ?? nonEmptyString(identity.invocationId);
+    callId?: string;
+}): string | undefined =>
+    nonEmptyString(identity.branchId) ?? nonEmptyString(identity.invocationId) ?? nonEmptyString(identity.callId);
 
 // Hover/accessible detail for a tile badge. Includes the AGENT (S6: two threads of
 // the same agent must be distinguishable) plus the full opaque id.
@@ -625,8 +650,10 @@ export const threadTitleOf = (
 //
 // `mode` is only the ROUTING decision (which thread the body addresses); it is not
 // a promise about how the server executes it. A running focus is `steer` even when
-// the submit cannot be steered: the server's steering API is text-only and skips
-// references whose target is not terminal yet, so an attachment-bearing or
+// the submit cannot be steered: the server's steering API is text-only, and it injects
+// reference context only when EVERY target can hand over its recorded content right now
+// (a row still `queued`/`running`, or a terminal row that left no answer, cannot —
+// sessions.ts `composeSteerReferences`), so an attachment-bearing or
 // unfinished-reference submit to a running thread becomes a QUEUED CONTINUATION
 // turn in that same thread (sessions.ts enqueue → steerIntoThread). The `queued`
 // flag below carries that qualifier, so the composer label never promises an
@@ -709,7 +736,8 @@ export const resolveSubmitTarget = (options: {
 // A `queued` steer says "Queued in" instead: the text and bytes are accepted into
 // that thread but run as a continuation turn once the active one finishes, so
 // "Steering" would promise an immediate fold-in the server will not perform
-// (attachments, or a referenced result that is not terminal yet).
+// (attachments, or a referenced result whose recorded content the server cannot inject
+// right now — a row still `queued`/`running`, or a terminal row that left no answer).
 //
 // `model` is the EFFECTIVE model id of the agent this send runs (main.ts
 // `agentSendPlanOf`), so the line states not only WHERE the message goes but WHAT

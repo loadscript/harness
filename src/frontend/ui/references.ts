@@ -42,22 +42,44 @@ import type { AgentResultBlock } from '../../shared';
 //   - `content` is the terminal answer when the block completed.
 export type AgentBlockDescriptor = AgentResultBlock;
 
-// Referenceable statuses: completed answers and work still in progress. A failed
-// or cancelled block has no usable result and must not be offered in the picker.
+// THE PICKER GATE — what the `#` popup may offer, and therefore what may ever reach
+// `SubmitTaskRequest.references`.
 //
-// F6 (2026-11-25) — and it must own an ADDRESS. A block whose label is
-// `UNADDRESSABLE_BLOCK_LABEL` (`T?`, ../../shared/agent-results.ts:270) — a threadFork branch
-// run, or a `delegate` placeholder whose child never started — carries a label that
-// deliberately fails `AGENT_REFERENCE_LABEL_PATTERN` (`/^[A-Z]{2}\d+$/`), so no door can
-// resolve it: a run whose identity is unknown cannot be bound as a `#` reference even though
-// its status looks referenceable. Without this gate the composer offers `#T?`, its chip
-// serializes into `SubmitTaskRequest.references`, and the server's
-// `readAgentResultReferenceList` (../../shared/agent-results.ts) rejects the WHOLE request
-// with a 400 — one unaddressable chip would sink a message that also carries real references.
-// `agentLabelParts` is the SAME parser every label door uses (`normalizeAgentLabel` →
-// `findAgentResultBlock` → that reader), so this filter cannot drift from the server's rule.
+// R-TREF (2026-11-26) — TERMINAL ROWS ARE REFERENCEABLE. The status clause used to stop
+// at `done|running|queued`, so a failed, stopped or cancelled row could be SEEN with a
+// valid label and still not be picked. That contradicted the mandate the labels exist for:
+//   "All labels must be valid… all labels must be unique… user using these label to
+//    reference as needed… All thread that started, regardless of failure etc… must be
+//    assigned a proper label."
+// The label is the address; the RESULT is a separate question, and the server already owns
+// it: `bindReference` (../../../../../underload/harness/src/server/sessions.ts) now accepts
+// a terminal target, and `composeReferences` injects the block's content when it has any
+// and `referencedResultUnavailableNote` when it has none. Refusing the chip here would
+// leave the freshly-labelled rows the user most needs to name — a child that never
+// started, a run they stopped — unreachable, while the SAME reference typed as plain
+// `#HR2` text went through. Both packages moved in one fold so no chip can mint that the
+// server rejects at submit.
+//
+// The label clause is the whole filter now, and it stays on purpose:
+//   1. it is the client half of the server's parse. `agentLabelParts` is the SAME parser
+//      every label door uses (`normalizeAgentLabel` → `findAgentResultBlock` →
+//      `readAgentResultReferenceList`), so a hand-built or legacy descriptor whose label is
+//      not an address (a pre-F11 record still carrying `T?`, a fixture, a projection from an
+//      older server) is dropped HERE instead of 400-ing the submit — that reader rejects the
+//      ENTIRE list when any label is malformed, so one unaddressable token would sink a
+//      message that also carries real references;
+//   2. it states, at the picker, the rule the doors enforce — a chip must be a
+//      `<CODE><ordinal>` address, and the row's label is now exactly that (own mint,
+//      conversation join, or the conversation a branch displays).
+// The status list is kept as an explicit enumeration of `AgentResultStatus` (rather than
+// `true`) so a status the SERVER has not agreed to bind — a future `stopped`, say — falls
+// out of the picker instead of minting a chip that fails at submit.
 export const isReferenceableBlock = (block: Pick<AgentBlockDescriptor, 'status' | 'label'>): boolean =>
-    (block.status === 'done' || block.status === 'running' || block.status === 'queued') &&
+    (block.status === 'done' ||
+        block.status === 'running' ||
+        block.status === 'queued' ||
+        block.status === 'error' ||
+        block.status === 'cancelled') &&
     agentLabelParts(block.label) !== undefined;
 
 // Wire contract (T4): SubmitTaskRequest.references and SessionTurn.references.

@@ -90,9 +90,10 @@ type ThreadFixture = {
 };
 
 // `events` defaults to a settled ANSWER, not an empty list, because the board's BLOCKS are
-// what `#` references bind to (ui/references.ts:44): a turn with no events paints a row with
-// no referenceable block, so the `#` popup would open EMPTY and the popup-vs-cycle case below
-// could not be pinned on this fixture. An explicit `events: []` still overrides it.
+// what `#` references bind to (ui/references.ts:77 `isReferenceableBlock` — a labelled row
+// of ANY status): a turn with no events paints a row with no referenceable block, so the `#`
+// popup would open EMPTY and the popup-vs-cycle case below could not be pinned on this
+// fixture. An explicit `events: []` still overrides it.
 const turn = (overrides: Partial<SessionTurn> = {}): SessionTurn =>
     ({
         id: 'turn-1',

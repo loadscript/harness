@@ -1108,6 +1108,26 @@ export type ToolSearchResult = {
     // already-available core tool is therefore NOT reported as unmatched, so the
     // model is never told a capability it can already call is absent.
     unmatchedTags?: string[];
+    // D7 (2026-11-26) — the EXACT-NAME mirror of `unmatchedTags`: the names of a NAMES query
+    // that matched NOTHING selectable — absent from `tools`, from `alreadyAvailable` AND from
+    // `forbidden`, which is exactly the selector's whole union (the denied entries are
+    // partitions of it, never extra names). A name that MATCHED and was then cut by `limit`/the
+    // enabled bound is NOT here — it is counted in `remaining`, a different fact, and it stays a
+    // match. Names stay EXACT and case-sensitive, as the selector matches them: the only
+    // filtering is the selector's own (drop the empty string, deduplicate, keep caller order).
+    // Absence-conditional like `unmatchedTags`, so a fully-matched query keeps its exact pinned
+    // shape and a tag/regex-only query gains nothing at all.
+    // (Mirrors ../../../../../underload/harness/src/engine/harness.ts `searchTools` D7.)
+    unmatchedNames?: string[];
+    // D7: a one-sentence, honest explanation of the ONE absence this door can state truthfully —
+    // a name that IS registered but is withheld from THIS caller by the rank rule (a core tool
+    // `visibleCoreTools` drops because nobody ranks below the caller). Every other unmatched name
+    // keeps its honest absence: no note, `unmatchedNames` only — a name nobody registered admits
+    // no reason, a name this conversation switched off is invisible by design, and a
+    // pending-only control has no catalogue identity. The wording reuses the rank-refusal
+    // vocabulary `delegate` publishes, so the two doors can never tell two different stories
+    // about one rank. Present only when at least one name is withheld.
+    note?: string;
     // Every tag in the searchable catalogue. Present only when nothing matched,
     // so the model can retry with real vocabulary instead of guessing.
     availableTags?: string[];

@@ -697,8 +697,9 @@ it('never sends while the suggestion list owns Enter, even with a hardware keybo
 
 it('picks the active suggestion row on Tab instead of moving focus out of the field', async () => {
     // A restored conversation with ONE settled turn whose events produced a real answer block:
-    // `#` references point at BLOCKS (ui/references.ts:44 keeps `done`/`running`/`queued`), so
-    // a turn with no events leaves the list open but empty — the state the case below pins.
+    // `#` references point at BLOCKS (ui/references.ts:77 — the label is the address, every
+    // status binds), so a turn with no events leaves the list open but empty — the state the
+    // case below pins.
     const referenceable = turn({
         status: 'done',
         prompt: 'first question',

@@ -4982,8 +4982,9 @@ const referencePopupItems = (query: string): ComposerPopupItem[] => {
     const blocks = (current?.view.blocks() ?? []).filter(isReferenceableBlock);
     // Latest occurrence wins: deleting before setting moves the label to the end,
     // so the popup shows the block the server would resolve for a plain `#LABEL`.
-    // Failed/cancelled blocks are filtered FIRST, so they never hide an earlier
-    // completed block with the same label.
+    // The gate (`isReferenceableBlock`) dropped only UNADDRESSABLE labels before this
+    // walk ran, so a terminal row competes for its label exactly like a live one —
+    // which is the row a plain `#LABEL` resolves to (the latest prior occurrence).
     const latest = new Map<string, AgentBlockDescriptor>();
     for (const block of blocks) {
         const label = normalizeReferenceLabel(block.label);
@@ -5333,8 +5334,15 @@ const selectComposerPopup = (index = composerPopupState?.index): boolean => {
 // below). In stop mode it is a plain button wired to `stopRun`.
 // Count draft references whose target turn has not settled yet (queued/running).
 // The server only steers WITH reference context when every target is already `done`
-// (sessions.ts `composeSteerReferences` returns undefined otherwise) — a live target
-// makes the submit a queued continuation in the focused thread. `records` is the
+// AND recorded content (sessions.ts `composeSteerReferences` returns undefined
+// otherwise), so a live target makes the submit a queued continuation in the focused
+// thread. The two tests are NOT identical, and that asymmetry is stated here rather
+// than hidden: this count is TURN-level and counts only `queued`/`running`, so a target
+// that settled on `error`/`cancelled` — or `done` with no recorded content, the rows
+// R-TREF made referenceable — is not counted, the composer labels such a submit
+// "Steering", and the server still defers it to a queued continuation. Nothing is lost
+// either way (the content or the unavailable-result note is composed at execution), but
+// this flag is the composer's approximation, not the server's receipt. `records` is the
 // authoritative per-turn map (`Instance.records`); an id it does not know is already
 // gone and `purgeStaleReferences`/the submit boundary filter drop it, so it must not
 // inflate this count.
@@ -13978,7 +13986,8 @@ const cancelDisplayRefresh = (instance: Instance): void => {
 //     receipt, so an accepted steer painted nothing inside the running conversation;
 //   - a `thread_id` the roster does not describe: a thread the server minted in this submit is
 //     not in the roster this browser loaded, so the badge has no label to prefer
-//     (./ui/turns.ts falls back to `T?`);
+//     (./ui/turns.ts `threadLabelOf` names it by the id itself until the roster catches up —
+//     F11 removed the `T?` placeholder that used to sit in that slot);
 //   - the row also carries the attachment facts the compact wire publishes, so one read feeds
 //     the chips as well.
 // Anything else (a plain new turn in a known conversation, or a `queued` accept that the

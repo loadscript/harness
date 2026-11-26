@@ -201,8 +201,10 @@ describe('F7 — the retired list joins the roster as positive evidence', () => 
     it('synthesizes ONE honest partial for a retired id nothing names', () => {
         // The retired list carries bare ids: no agent, no label, no status, no invocation. The entry
         // exists to carry the marker into `deletedThreadIdsOf`, so every other field is the explicit
-        // "not knowable" shape — and `label: 'T?'` (../ui/threads.ts `UNKNOWN_THREAD_LABEL`) means a
-        // retired id consumes NO per-agent ordinal, which is asserted next.
+        // "not knowable" shape — and F11 (2026-11-26) makes the LABEL the id itself (the `T?`
+        // placeholder is removed from ui/threads.ts): a bare id is unique and copyable, and
+        // `threadNameOf` answers the same shape the same way. Because it is not an ordinal, a retired
+        // id still consumes NO per-agent number, which is asserted next.
         const roster = sessionThreadsOf({
             threadViews: [liveRow('thread-13', 'Instruct', 1)],
             inactiveThreads: ['thread-15']
@@ -214,7 +216,7 @@ describe('F7 — the retired list joins the roster as positive evidence', () => 
             origin: 'host',
             status: 'idle',
             sequence: 2,
-            label: 'T?',
+            label: 'thread-15',
             deleted: true
         });
     });
@@ -231,7 +233,9 @@ describe('F7 — the retired list joins the roster as positive evidence', () => 
         expect(roster.map((row) => [row.id, row.label])).toEqual([
             ['thread-13', 'WE1'],
             ['thread-16', 'WE2'],
-            ['thread-15', 'T?']
+            // F11: the retired row's name is its id, so it burns no `WE` ordinal and the two live
+            // conversations keep the numbers the reader knows.
+            ['thread-15', 'thread-15']
         ]);
     });
 

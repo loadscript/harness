@@ -694,21 +694,21 @@ describe('invocation thread entries', () => {
         // A delegation cancelled before its child ever started is resolved by the
         // root's terminal status, not left as a forever-queued row.
         //
-        // F6 (2026-11-25, deliberate expectation change): the row now reads `T?`
-        // (`UNKNOWN_THREAD_LABEL`), NOT `HR2`. A turn that has settled with a placeholder
-        // whose child NEVER started is not a run, so it owns no addressable label — the
-        // client twin of the end-of-turn sweep in ../../shared/agent-results.ts:845-869, whose
-        // projection of this SAME record says `label: 'T?'` for `call:d2`. The number that was
-        // tentatively taken is refunded to the board (no gap, no phantom `#HR2`), which is why
-        // the R5/R6 "labels continue across tiles" claim below is untouched for a row that
-        // really ran: the FIRST tile's helper still keeps `HR1`.
+        // F11 (2026-11-26, deliberate expectation change): the row now reads `HR2`, NOT `T?`.
+        // A turn that settles with a placeholder whose child NEVER started still occupies a row on
+        // the board, and the operator points at that row by its number: the attempt's ordinal is
+        // its own permanent address (the client twin of ../../shared/agent-results.ts
+        // `reserveDisplayedLabels`, whose projection of this SAME record says `label: 'HR2'` for
+        // `call:d2`). F6 handed the number back and painted `T?`, which is the token the mandate
+        // removes; F11 keeps the number and only ever MOVES it when it clashes with a stronger
+        // claim. The first tile's helper keeps `HR1`, so the numbering still runs without a gap.
         expect(threadRows(failed).map(project)).toEqual([
             {
                 id: 'call:d2',
                 depth: '1',
                 agent: 'helper',
                 state: 'error',
-                name: 'T?',
+                name: 'HR2',
                 status: 'error',
                 preview: 'queued task',
                 text: undefined,
@@ -891,15 +891,18 @@ describe('invocation thread entries', () => {
         board.adopt(record);
 
         expect(board.blocks()).toEqual(listAgentResultBlocks([record]));
-        // F6 (2026-11-25, deliberate expectation change): the branch row is `T?`, not `WR2`.
-        // A threadFork branch can never BE a durable conversation, so the ordinal this tile
-        // used to burn for it was an address nothing answered to — the user's `IT13 … have no
-        // label`, and one half of the duplicate `RR9`. The shared projection of this SAME
-        // record says `['WR1', 'T?']` (../../shared/agent-results.ts:630-661,
-        // `reserveLabel: false` for a branch run), and the line above pins that the client now
-        // agrees with it; the writer's own root label is unaffected, and the freed `WR2` is
-        // available to the next run that CAN own one.
-        expect(board.blocks().map((block) => block.label)).toEqual(['WR1', 'T?']);
+        // F11 (2026-11-26, deliberate expectation change): the branch row is `WR1` — the address
+        // of the conversation it forked from — and the token `T?` is gone. The mandate is that
+        // every rendered row carries a valid, unique, TYPEABLE label; a threadFork branch is part
+        // of its parent's conversation, so it displays that conversation's address
+        // (`labelSource: 'shared'`, ../../shared/agent-results.ts `branchSharedLabelOf`) and burns
+        // NOTHING from the writer sequence — the next conversation still reads `WR2`. A bare
+        // `#WR1` keeps resolving to the conversation's OWN block, because a `shared` row is
+        // skipped by the threadless label lookup; the branch stays bindable by
+        // `{ turnId, threadId: 'b1' }`, and the row paints its `b1` badge so two forks of one
+        // conversation are told apart (../ui/turns.ts `labelShared` → `paintEntryIdentity`).
+        // The line above keeps pinning that client and projection agree.
+        expect(board.blocks().map((block) => block.label)).toEqual(['WR1', 'WR1']);
     });
 
     it('attaches an unknown or self parent at depth 1 instead of throwing', () => {

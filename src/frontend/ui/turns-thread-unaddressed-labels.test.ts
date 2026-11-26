@@ -1,26 +1,36 @@
-// F6 (2026-11-25) — the CLIENT twin of the mint-leak fix (AC1: no ordinal is consumed by a
-// run that can never own one).
+// F6 (2026-11-25) / F11 (2026-11-26) — EVERY ROW OF A LIVE TILE KEEPS ITS OWN VALID LABEL.
 //
-// `../../shared/agent-results.ts` stopped minting per-agent ordinals for two kinds of block:
-// a threadFork BRANCH run (`reserveLabel: false`, :630-661) and a `delegate` PLACEHOLDER whose
-// child never started (the end-of-turn sweep, :845-869). Both read `UNADDRESSABLE_BLOCK_LABEL`
-// (`T?`), and `collectAgentLabelCounters` (:912-940) derives the durable counters from the
-// labels on screen, so a number no conversation answers to is never published.
+// THE MANDATE, verbatim (it is the requirement these tests pin, not an observation):
+//   "All labels must be valid. Cannot have T? or T- etc... all labels must be unique, as no
+//    thread share same labeling. This is because user using these label to reference as needed,
+//    and having a bunch of T? means they cannot reference specific one. All thread that started,
+//    regardless of failure etc... must be assigned a proper label."
 //
-// The browser's own tile allocator had the same leak: `nextLabel` published every allocation
-// into the board's `labelCounters` (ui/turns.ts), so a live session showed `IT13 … IT19` with
-// nothing behind them and skipped those numbers for good. These pins own the client rule:
-//   - AC1  a branch run and a settled un-adopted placeholder consume NOTHING, and the board's
-//          numbering continues without a gap (asserted through the labels of the NEXT tile,
-//          which is the only thing the shared counter is observable through);
-//   - AC2  a LIVE pending delegation still shows its number (the state ui/blocks.test.ts pins
-//          against the shared projection) — the retirement happens only once the turn settles;
-//   - and a placeholder that DID adopt its child keeps its number, so the counter keeps
-//         advancing exactly as far as the runs that really happened.
+// WHAT CHANGED, and what did NOT.
 //
-// F10 (R10.2) adds the two late-adoption pins at the bottom of this file: a row that handed its
-// number back and THEN became addressable again takes its own number back when it is provably
-// free, and the next free number when it is not — see `reinstateEntryLabel` in ui/turns.ts.
+// F6 stopped the CLIENT tile from spending an ordinal on two kinds of run — a threadFork BRANCH
+// and a `delegate` placeholder whose child NEVER STARTED — and painted both `UNKNOWN_THREAD_LABEL`
+// (`T?`), mirroring `UNADDRESSABLE_BLOCK_LABEL` in ../../shared/agent-results.ts. That fixed the
+// phantom `IT13 … IT19` the operator measured, and it introduced the defect F11 removes: a screen
+// full of `T?`, none of which could be typed, and a failed run with no address at all.
+//
+// F11 keeps the LEAK rules and drops the PLACEHOLDER:
+//   AC1  a row that is rendered carries a valid `<CODE><ordinal>` — never `T?`, never the empty
+//        string — and the number it shows is RESERVED while it shows it (the board's numbering
+//        continues after every displayed label, so two visible rows can never share one name);
+//   AC2  a LIVE pending delegation still shows its number (the state ui/blocks.test.ts pins
+//        against the shared projection) and KEEPS it once the turn settles — the settle pass
+//        (ui/turns.ts `settleUnstartedLabels`) only MOVES a number when it clashes with a
+//        stronger claim, it never takes the address away;
+//   AC3  a threadFork BRANCH displays the address of the conversation it forked FROM
+//        (`labelShared`, the twin of ../../shared/agent-results.ts `branchSharedLabelOf`),
+//        burning nothing from that agent's sequence, and keeps its `branch-N` badge so two forks
+//        of one conversation are distinguishable;
+//   AC4  a row that hands its number back (a roster join, a wire label, a borrowed conversation
+//        code) and then LATE becomes a real run takes a provably free ordinal back — its own when
+//        it is still free, the next free one when another tile took it (ui/turns.ts
+//        `reinstateEntryLabel` → `ordinalIsFree`), which is the one place the F6 retraction
+//        machinery is still reachable.
 //
 // Run: yarn vitest run --config src/frontend/vitest.config.ts ui/turns-thread-unaddressed-labels.test.ts
 
@@ -94,20 +104,26 @@ const threadRows = (turn: TurnHandle): HTMLElement[] => [
     ...((turn.element.parentElement as HTMLElement).querySelectorAll<HTMLElement>('.thread-row') ?? [])
 ];
 
-// The visible per-invocation code of every row, in DOM order. `T?` IS the expected value here:
-// it is the text the row must show when its run owns no addressable label.
+// The visible per-invocation code of every row, in DOM order. Under F11 this is ALWAYS a
+// `<CODE><ordinal>`: `T?` (`UNKNOWN_THREAD_LABEL`, deleted from ./threads.ts) and the empty name
+// are both failures, and every case below asserts the exact expected code.
 const rowLabels = (turn: TurnHandle): string[] =>
     threadRows(turn).map((row) => row.querySelector('.thread-name')?.textContent ?? '');
 
 // The tile's own root code (the root invocation has no row).
 const rootLabel = (turn: TurnHandle): string => turn.element.querySelector('.tile-agent')?.textContent ?? '';
 
+// The row's identity BADGE — the figure that separates two rows that display the same borrowed
+// conversation code (a fork), and the one thing F11 keeps from F10/R10.5.
+const rowIdentity = (turn: TurnHandle): (string | undefined)[] =>
+    threadRows(turn).map((row) => row.dataset.threadIdentity);
+
 // Identity-only comparison (the same field set ui/blocks.test.ts pins): the descriptor's
 // `status`/`content` follow the tile's transport state, which is not what these labels are
 // about, and a live tile legitimately reports a different status from a projected block.
 const identityOf = (block: { threadId?: string; label: string }): string => `${block.threadId ?? 'root'}:${block.label}`;
 
-it('consumes no ordinal for a threadFork branch, and gives the freed number to the next run that can own one', () => {
+it('names a threadFork branch with its conversation and gives the next run the very next number', () => {
     const board = mount();
 
     const first = live(board, 'fork this', 'turn-a', 0);
@@ -115,20 +131,23 @@ it('consumes no ordinal for a threadFork branch, and gives the freed number to t
     for (const event of firstEvents) first.apply(event);
     first.flush();
 
-    // The branch row owns no addressable identity: unknown label, and NO number taken from the
-    // writer sequence.
-    expect(rowLabels(first)).toEqual(['T?']);
+    // AC3: the branch row displays `WR1` — the address of the conversation it forked from — and
+    // takes NOTHING from the writer sequence beyond what the conversation itself owns. `T?` (the
+    // F6 answer) is gone: a branch row is on screen, so it wears a valid, typeable code, and the
+    // `branch-1` figure rides as the row's identity data so two forks of `WR1` differ.
+    expect(rowLabels(first)).toEqual(['WR1']);
+    expect(rowIdentity(first)).toEqual(['branch-1']);
     expect(rootLabel(first)).toBe('WR1');
-    expect(first.blocks().map(identityOf)).toEqual(['root:WR1', 'branch-1:T?']);
+    expect(first.blocks().map(identityOf)).toEqual(['root:WR1', 'branch-1:WR1']);
 
     // The settled record's own projection says the same, one identity per block — the client
-    // cannot renumber a run the shared projection refuses a label for.
+    // cannot renumber a run the shared projection names (`labelSource: 'shared'`).
     const record = serverTurn({ id: 'turn-a', index: 0, status: 'running', events: firstEvents });
     expect(first.blocks().map(identityOf)).toEqual(listAgentResultBlocks([record]).map(identityOf));
 
-    // A LATER turn's runs of the same code continue straight after WR1: the branch never
-    // burned WR2, so the sequence has no gap. Before the fix these read WR1 / WR4 (root WR2
-    // for the branch, WR3 for the root, WR4 for the child).
+    // A LATER turn's runs of the same code continue straight after WR1: the branch burned no
+    // ordinal of its own, so the sequence has no gap (F6's no-gap rule, unchanged by F11 — the
+    // branch's label is the CONVERSATION's number, already reserved by the conversation).
     const second = live(board, 'next', 'turn-b', 1);
     const secondEvents: HarnessEvent[] = [
         { type: 'start', agent: 'writer', model: 'm1' } as unknown as HarnessEvent,
@@ -147,7 +166,7 @@ it('consumes no ordinal for a threadFork branch, and gives the freed number to t
     ).toEqual(['root:WR1', 'root:WR2', 't9:WR3']);
 });
 
-it('keeps a live pending delegation numbered, and retires the number only once the turn settles', () => {
+it('keeps a live pending delegation numbered, and keeps it once the turn settles', () => {
     const board = mount();
 
     const first = live(board, 'delegate', 'turn-a', 0);
@@ -169,24 +188,29 @@ it('keeps a live pending delegation numbered, and retires the number only once t
         )
     );
 
-    // The turn ends with NO child frame at all. The row is still rendered (the call really
-    // happened) but it is not a run, so it gives up the ordinal it tentatively took.
+    // THE F11 HALF: the turn ends with NO child frame at all. F6 handed `HR1` back and painted
+    // `T?`; F11 keeps the number, because the row is on screen, the call really happened, and the
+    // operator points at a refused delegation by its code. The number is the row's OWN address
+    // permanently — `collectAgentLabelCounters` reserves it, so no later turn can name a
+    // conversation with it.
     first.setState('error', 'boom');
     first.flush();
 
-    expect(rowLabels(first)).toEqual(['T?']);
-    expect(first.blocks().map(identityOf)).toEqual(['root:WR1', 'call:d1:T?']);
+    expect(rowLabels(first)).toEqual(['HR1']);
+    expect(first.blocks().map(identityOf)).toEqual(['root:WR1', 'call:d1:HR1']);
 
     // The same recorded turn, replayed through the hydration path, lands on the same label —
-    // the retirement is a property of the record, not of the live moment it was observed in.
+    // live and replay agree, which is the property the label has to have to be citable.
     const replayBoard = mount();
     const replayRecord = serverTurn({ id: 'turn-a', index: 0, status: 'error', events: firstEvents });
     const [replay] = replayBoard.hydrate([replayRecord]);
-    expect(rowLabels(replay)).toEqual(['T?']);
+    expect(rowLabels(replay)).toEqual(['HR1']);
     expect(replay.blocks().map(identityOf)).toEqual(listAgentResultBlocks([replayRecord]).map(identityOf));
 
-    // AC1 — the freed ordinal is back in circulation: a later turn's REAL helper run is HR1,
-    // not HR2, and the writer sequence is untouched (WR2 for its root).
+    // AC1 — the ordinal is RESERVED, not back in circulation: a later turn's REAL helper run is
+    // `HR2`, so the board never shows `HR1` twice. (F6's answer was `HR1` again — the number had
+    // been refunded — and that is exactly the renumbering F11 forbids: the operator may already
+    // be holding `#HR1` from the failed row.)
     const second = live(board, 'retry', 'turn-b', 1);
     for (const event of [
         { type: 'start', agent: 'writer', model: 'm1' } as unknown as HarnessEvent,
@@ -197,24 +221,22 @@ it('keeps a live pending delegation numbered, and retires the number only once t
     second.flush();
 
     expect(rootLabel(second)).toBe('WR2');
-    expect(rowLabels(second)).toEqual(['HR1']);
+    expect(rowLabels(second)).toEqual(['HR2']);
+    expect(new Set([...rowLabels(first), ...rowLabels(second)]).size).toBe(2);
 });
 
-// F10 (R10.2) — the twin failure of the retraction above. The row that gave its number back is
-// not necessarily finished: a `delegate` placeholder can adopt its child LATE (the worker's
-// trailing `start` frame, a `thread` record that lands after the terminal frame, a roster poll
-// that delivers the join before the child's transcript). Re-admitting that run has to answer the
-// question the retraction already settled — which number is ITS OWN — and both wrong answers were
-// observed on the operator's board:
-//   - minting a FRESH ordinal left a hole the reader reads as a broken sequence (`RR9` retracted,
-//     the late child shown at `RR10`, `RR9` now nobody's); and
+// F10 (R10.2) machinery, still reachable under F11 — but only for a row that gave its number up
+// for a BETTER NAME (a wire label, a roster conversation join, a borrowed conversation code),
+// never because a settle pass decided the row owns nothing. The two wrong answers F10 measured
+// on the operator's board stay pinned:
+//   - minting a FRESH ordinal after a refund left a hole the reader reads as a broken sequence; and
 //   - reusing a number WITHOUT CHECKING puts two visible rows on one name when another tile took
 //     the freed number in the meantime, which is the one failure this fold may never cause.
 // The rule (ui/turns.ts `reinstateEntryLabel` → `ordinalIsFree`) is: take the freed number back
 // iff no server-recorded floor reaches it, no row on ANY tile of the board wears it, and this
-// tile's high water is below it; otherwise mint the next free ordinal — never `T?`, because the
-// row is a run now.
-it('gives a retracted row its OWN number back when its child arrives after the settle', () => {
+// tile's high water is below it; otherwise mint the next free ordinal — never a placeholder,
+// because the row is a run now.
+it('gives a row that borrowed a conversation code a provably free ordinal when its child arrives late', () => {
     const board = mount();
 
     const first = live(board, 'delegate', 'turn-a', 0);
@@ -225,20 +247,21 @@ it('gives a retracted row its OWN number back when its child arrives after the s
     for (const event of firstEvents) first.apply(event);
     first.flush();
 
-    // The pending call owns HR1, then gives it up when the turn settles with no child frame.
+    // The pending call owns HR1…
     expect(rowLabels(first)).toEqual(['HR1']);
+
+    // …and under F11 it STILL owns it after the turn settles with no child frame: the settle pass
+    // reserves the mint rather than retracting it, so the late-adoption path has nothing to
+    // reclaim and the row keeps the exact code the operator was reading.
     first.setState('error', 'boom');
     first.flush();
-    expect(rowLabels(first)).toEqual(['T?']);
+    expect(rowLabels(first)).toEqual(['HR1']);
 
-    // The child's frame lands AFTER the settle sweep. The row is addressable again
-    // (`call:d1` → `t1`), and the number it handed back has not been spent by anyone.
+    // The child's frame lands AFTER the settle pass. The row is addressable by its conversation
+    // id now (`call:d1` → `t1`) and keeps its number — no re-mint, no hole.
     first.apply(withThread({ type: 'start', agent: 'helper', model: 'h1' }, { id: 't1', callId: 'd1', input: 'child task' }));
     first.flush();
 
-    // HR1 — ITS OWN number, the one the operator saw before the retraction — and not the fresh
-    // HR2 the tile allocator would hand out (HR1 is above this tile's high water, which the
-    // refund lowered to 0, and below nothing else).
     expect(rowLabels(first)).toEqual(['HR1']);
     expect(first.blocks().map(identityOf)).toEqual(['root:WR1', 't1:HR1']);
 
@@ -258,7 +281,7 @@ it('gives a retracted row its OWN number back when its child arrives after the s
     expect(new Set([...rowLabels(first), ...rowLabels(second)]).size).toBe(2);
 });
 
-it('mint the next number instead of a worn one when another tile took the freed ordinal first', () => {
+it('never re-wears a number another row holds: the reserved mint outranks a later tile', () => {
     const board = mount();
 
     const first = live(board, 'delegate', 'turn-a', 0);
@@ -271,7 +294,9 @@ it('mint the next number instead of a worn one when another tile took the freed 
     first.setState('error', 'boom');
     first.flush();
 
-    // HR1 is free, so a LATER tile's real helper run takes it (the no-gap rule pinned above).
+    // F6 freed HR1 here, so a later tile's real helper run took it. Under F11 the failed row is
+    // STILL wearing HR1, and the allocator's floor says so: the later run must not be put on the
+    // same address, and it is not — it reads HR2.
     const second = live(board, 'retry', 'turn-b', 1);
     for (const event of [
         { type: 'start', agent: 'writer', model: 'm1' } as unknown as HarnessEvent,
@@ -280,17 +305,64 @@ it('mint the next number instead of a worn one when another tile took the freed 
     ])
         second.apply(event);
     second.flush();
-    expect(rowLabels(second)).toEqual(['HR1']);
 
-    // Now the late child of turn-a arrives. HR1 is displayed on THIS board (turn-b's row), so
-    // reinstating it would put two rows on one address; the row takes the next free ordinal
-    // instead, and both rows stay addressable.
+    expect(rowLabels(first)).toEqual(['HR1']);
+    expect(rowLabels(second)).toEqual(['HR2']);
+    expect(new Set([...rowLabels(first), ...rowLabels(second)]).size).toBe(2);
+
+    // And the late child of turn-a changes nothing: its row already owns HR1, and the tile does
+    // not re-mint a code that is already displayed.
     first.apply(withThread({ type: 'start', agent: 'helper', model: 'h1' }, { id: 't1', callId: 'd1', input: 'child task' }));
     first.flush();
 
-    expect(rowLabels(first)).toEqual(['HR2']);
-    expect(rowLabels(second)).toEqual(['HR1']);
-    expect(new Set([...rowLabels(first), ...rowLabels(second)]).size).toBe(2);
+    expect(rowLabels(first)).toEqual(['HR1']);
+    expect(rowLabels(second)).toEqual(['HR2']);
+});
+
+it('gives two refused attempts of one agent two different labels', () => {
+    const board = mount();
+
+    // The case that made `T?` unshippable: the operator's turn held SEVERAL delegations that never
+    // started. One shared placeholder token made them indistinguishable; two ordinals name each
+    // attempt, and the record projects the same two codes.
+    const first = live(board, 'delegate twice', 'turn-a', 0);
+    const firstEvents: HarnessEvent[] = [
+        { type: 'start', agent: 'writer', model: 'm1' } as unknown as HarnessEvent,
+        delegateCall('helper', 'd1'),
+        delegateCall('helper', 'd2')
+    ];
+    for (const event of firstEvents) first.apply(event);
+    first.setState('error', 'boom');
+    first.flush();
+
+    expect(rowLabels(first)).toEqual(['HR1', 'HR2']);
+    expect(first.blocks().map(identityOf)).toEqual([
+        'root:WR1',
+        'call:d1:HR1',
+        'call:d2:HR2'
+    ]);
+
+    // The projection of the SAME record agrees, block for block — the live board and a reload
+    // cannot offer the operator two different answers to `#HR1`.
+    const record = serverTurn({ id: 'turn-a', index: 0, status: 'error', events: firstEvents });
+
+    expect(first.blocks().map(identityOf)).toEqual(listAgentResultBlocks([record]).map(identityOf));
+
+    // A later REAL helper run continues after both attempts, so the numbering stays dense and
+    // collision-free across a mixed fleet of failed and real runs.
+    const second = live(board, 'third time', 'turn-b', 1);
+    for (const event of [
+        { type: 'start', agent: 'writer', model: 'm1' } as unknown as HarnessEvent,
+        delegateCall('helper', 'd3'),
+        withThread({ type: 'start', agent: 'helper', model: 'h1' }, { id: 't3', callId: 'd3', input: 'child task' })
+    ])
+        second.apply(event);
+    second.flush();
+
+    expect(rowLabels(second)).toEqual(['HR3']);
+    expect(
+        new Set([...rowLabels(first), ...rowLabels(second)]).size
+    ).toBe(3);
 });
 
 it('keeps the number of a placeholder that adopted its child, so the numbering continues after a real run', () => {
@@ -307,9 +379,9 @@ it('keeps the number of a placeholder that adopted its child, so the numbering c
 
     expect(rowLabels(first)).toEqual(['HR1']);
 
-    // The child started, so the end-of-turn sweep must NOT touch it: the settle transition
-    // closes the row (`done`) and its number stays owned. Over-retracting here would re-mint
-    // HR1 in a later tile and put two visible rows on one address.
+    // The child started, so the settle pass must NOT move the row: the settle transition closes
+    // the row (`done`) and its number stays owned. Over-retiring here would re-mint HR1 in a later
+    // tile and put two visible rows on one address.
     first.setState('done');
     first.flush();
 
