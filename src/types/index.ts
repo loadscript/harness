@@ -105,6 +105,17 @@ export type ToolMediaDescriptor = {
 // keys scheduled work and paired tool results by it. A turn that repeats an id, or
 // reuses one already committed, is rejected before any call executes (the run rolls
 // back) rather than letting one result silently alias another.
+//
+// THE RESERVED `async` KEY (see ../core/tool.ts). Every declaration the harness offers
+// carries one optional boolean property, `async`, so a call may name its OWN turn mode:
+// `true` resolves the call to 'async', `false` to 'sync', and its absence means "the
+// tool's own default". It is a harness-level switch, NOT a tool parameter: the harness
+// reads it to decide whether the completion joins its message's sync group, then strips
+// it in ./core/schema-validation.ts, so it never reaches schema validation,
+// `context.parameters`, or the implementation. The raw string above is the model's own
+// utterance and is never rewritten, so a transcript entry still shows the switch the
+// model wrote. A tool whose OWN schema declares `async` owns that property: the harness
+// neither injects it, nor strips it, nor lets it decide the mode.
 export type HarnessToolCall = {
     id: string;
     name: string;
@@ -3300,6 +3311,17 @@ export type ToolContext<TParameters = any> = {
 // built-ins state their mode in their own `registration` literal so the policy
 // survives scanning, the generated manifest, and source loading without ever being
 // re-derived from a name.
+//
+// THE PER-CALL OVERRIDE. This declares the DEFAULT for a tool; a single call may
+// replace it with the reserved `async` property in its own arguments — `true` for
+// 'async', `false` for 'sync', absent for the chain above (see ../core/tool.ts, which
+// owns the key). The precedence at dispatch is: the switch on the call, then the
+// registration policy, then the mode the definition declares, then this default — plus
+// ONE built-in refinement: a `delegate` call that resolved to 'async' with no switch on
+// it, in a message holding exactly ONE async-resolving call, resolves to 'sync', because
+// one child is the shape where the spawner is waiting on that child's answer. A tool that
+// declares an `async` property in its OWN schema keeps it as a plain argument and is
+// never reached by the switch.
 export type ToolMode = 'sync' | 'async';
 
 // A tool definition. `name` is optional: inside a harness the registry key names
